@@ -1,0 +1,69 @@
+*nxvim-markdown-preview.txt*	Live in-browser markdown preview for nxvim
+
+==============================================================================
+INTRO				*nxvim-markdown-preview* *markdown-preview-intro*
+
+nxvim-markdown-preview is a live, in-browser markdown preview. It is an
+optional first-party plugin built entirely on the native nx.* plugin API.
+
+The editor serves your open buffers over a single |nx.http.mount|; the browser
+renders them (marked for markdown, mermaid for diagrams). One page previews
+EVERY open markdown buffer — a sidebar switches between them, and with nothing
+pinned the page follows the editor's active buffer.
+
+	:MarkdownPreview		Mount (lazily) and open the preview.
+	:MarkdownPreviewStop		Retire the mount.
+	:MarkdownPreviewToggle		Open if stopped, stop if open.
+
+See also |markdown-preview-usage| and |markdown-preview-options|.
+
+==============================================================================
+USAGE							*markdown-preview-usage*
+
+						*:MarkdownPreview*
+:MarkdownPreview	Bind the mount if it is not up yet (nothing opens a port
+		before this), then open the preview in your browser. The page
+		follows the current buffer, so it works from whichever
+		markdown file is focused. Reusing the command re-opens the
+		browser at the same stable URL.
+
+						*:MarkdownPreviewStop*
+:MarkdownPreviewStop	Close the mount. The URL starts 404ing and open tabs
+		show "editor gone". Reopening rebinds under the same name.
+
+						*:MarkdownPreviewToggle*
+:MarkdownPreviewToggle	Open the preview if it is stopped, stop it if open.
+
+In the browser: the left sidebar lists the open markdown buffers — click one to
+pin it. "Follow editor" (top of the sidebar) clears the pin so the page tracks
+whichever buffer is active in the editor. Edits appear on the next poll
+(~500 ms); no :write is needed.
+
+A buffer counts as markdown when 'filetype' is "markdown", or its name ends in
+a markdown extension (.md, .markdown, .mdown, .mkd, .mdx, ...).
+
+Note: marked and mermaid load from the jsDelivr CDN, so the preview page needs
+internet for those two libraries. It renders your local buffers but pulls the
+renderer from a CDN.
+
+==============================================================================
+OPTIONS						*markdown-preview-options*
+
+WHERE the preview listens is your call, not the plugin's — the 'httphost' and
+'httpport' options, read when the mount binds. The default is an ephemeral
+loopback port (127.0.0.1, 'httpport' = 0). Pin a stable one: >lua
+
+	nx.o.httpport = 8080          -- 0 (default) picks a free port
+	-- nx.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
+<
+==============================================================================
+SETUP							*markdown-preview-setup*
+
+With :Plugins the plugin is on the runtimepath and setup() runs automatically,
+so the commands exist out of the box. Calling it yourself is harmless: >lua
+
+	require("nxvim-markdown-preview").setup()
+<
+setup() only registers the commands — it never binds a mount.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
