@@ -14,6 +14,10 @@
 -- With no hash in the URL it FOLLOWS the editor's active buffer; the sidebar pins a buffer
 -- (`#b:<id>`); "⟳ follow editor" clears the pin.
 --
+-- Cursor line: each block is wrapped with its source-line range, so the editor's cursor
+-- line (polled from `/buffers`) is mapped back to a rendered block and highlighted — but
+-- only while the page is showing the editor's ACTIVE buffer, the one the cursor is in.
+--
 -- Link navigation: a click on a markdown link inside the rendered doc navigates the
 -- preview to that file (`#f:<abs path>`) instead of the browser leaving the page — even
 -- when the target is not an open buffer, in which case `/file` reads it straight from
@@ -89,6 +93,10 @@ local HTML = [==[
   #follow:hover { opacity: 1; }
   #follow.on { color: #3fb950; opacity: .9; }
   #main { flex: 1 1 auto; min-width: 0; padding: 2rem 2.2rem; max-width: 52rem; }
+  /* Each top-level block is wrapped so it can carry its source-line range and take the
+     cursor-line highlight; the negative margin keeps its text aligned with the rest. */
+  .blk { padding: 0 .6rem; margin: 0 -.6rem; border-radius: 6px; transition: background .1s; }
+  .blk.cursor-here { background: color-mix(in srgb, #4493f8 14%, transparent); box-shadow: inset 3px 0 0 #4493f8; }
   #status { position: fixed; top: .6rem; right: .8rem; font-size: .72rem; opacity: .5; font-family: ui-monospace, monospace; }
   h1, h2, h3 { line-height: 1.25; margin: 1.6em 0 .5em; }
   h1 { border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); padding-bottom: .25em; }
@@ -176,6 +184,25 @@ let listKey = null;    // signature of the last sidebar, so we only rebuild on a
 
 function setStatus(s) { statusEl.textContent = s; }
 
+// Parse markdown, wrapping each top-level block in a <div class="blk"> that records its
+// SOURCE-line range (data-ls..data-le). Tokens' `raw` concatenate to the source, so
+// counting their newlines tracks the line each block starts and ends on — which is how
+// the editor's cursor line maps back to a rendered block.
+function renderAnnotated(md) {
+  const tokens = marked.lexer(md);
+  let line = 1, html = "";
+  for (const tok of tokens) {
+    const raw = tok.raw || "";
+    const nl = (raw.match(/\n/g) || []).length;
+    const ls = line, le = ls + nl - (raw.endsWith("\n") ? 1 : 0);
+    line += nl;
+    if (tok.type === "space") continue;   // blank runs render nothing to mark
+    const one = [tok]; one.links = tokens.links;   // keep reference-link defs for the parser
+    html += `<div class="blk" data-ls="${ls}" data-le="${le}">${marked.parser(one)}</div>`;
+  }
+  return html;
+}
+
 // Fetch `url` and render it, unless its text is unchanged from last time. Returns false
 // when the source is gone (a closed buffer, an unreadable file) so the caller can react.
 async function renderFrom(url, key, path) {
@@ -186,11 +213,25 @@ async function renderFrom(url, key, path) {
   if (key === shownKey && md === shownText) return true;
   const switched = key !== shownKey;   // a different doc, not just a live edit of this one
   shownKey = key; shownText = md;
-  mainEl.innerHTML = marked.parse(md);
+  mainEl.innerHTML = renderAnnotated(md);
   await mermaid.run({ nodes: mainEl.querySelectorAll("pre.mermaid") });
   // Switching documents starts at the top; an edit to the SAME doc keeps your place.
   if (switched) scrollTo(0, 0);
   return true;
+}
+
+// Mark the block that holds source `line` (1-based) as the cursor line; `null` clears it.
+// Cheap enough to run every poll — the cursor moves without the text changing, so this is
+// separate from the re-render.
+function applyCursor(line) {
+  const blocks = mainEl.querySelectorAll(".blk");
+  let hit = null;
+  if (line != null) {
+    for (const b of blocks) {
+      if (line >= +b.dataset.ls && line <= +b.dataset.le) { hit = b; break; }
+    }
+  }
+  for (const b of blocks) b.classList.toggle("cursor-here", b === hit);
 }
 
 function showEmpty(msg) {
@@ -280,10 +321,13 @@ async function tick() {
       const b = data.list.find(x => x.id === target.buf);
       await renderFrom("source?buf=" + target.buf, "b:" + target.buf, b ? b.name : null);
       document.title = (b ? b.label : "buffer " + target.buf) + " — preview";
+      // The editor's cursor line belongs to the ACTIVE buffer, so mark it only there.
+      applyCursor(target.buf === data.active ? data.cursor : null);
     } else {
       const ok = await renderFrom("file?path=" + encodeURIComponent(target.file), "f:" + target.file, target.file);
       if (!ok) showEmpty("cannot read " + target.file);
       document.title = baseName(target.file) + " — preview";
+      applyCursor(null);   // a disk file has no editor cursor in it
     }
     setStatus("live");
   } catch (e) {

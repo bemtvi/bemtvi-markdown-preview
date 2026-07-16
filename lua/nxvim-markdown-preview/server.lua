@@ -76,12 +76,13 @@ local function contains(root_canon, canon)
   return canon == root_canon or canon:sub(1, #root_canon + 1) == root_canon .. "/"
 end
 
--- `M.buffers()` -> `{ active = <bufnr|nil>, root = <cwd>, list = { { id, name, label }, ... } }`
+-- `M.buffers()` -> `{ active, cursor, root, list = { { id, name, label }, ... } }`
 --
 -- Every open markdown buffer, ascending, plus which one the editor currently shows
--- (`active`, nil when the current buffer is not markdown) and the workspace `root` (so
--- the page can label a linked disk file relative to it). The page renders `active` in
--- follow mode and lists `list` in the sidebar.
+-- (`active`, nil when the current buffer is not markdown), the 1-based `cursor` line in
+-- that active buffer (nil when there is none), and the workspace `root` (so the page can
+-- label a linked disk file relative to it). The page renders `active` in follow mode,
+-- lists `list` in the sidebar, and marks the `cursor` line when it is showing `active`.
 function M.buffers()
   local list = {}
   for _, id in ipairs(nx.buf.list()) do
@@ -91,7 +92,11 @@ function M.buffers()
     end
   end
   local cur = nx.buf.current()
-  return { active = is_markdown(cur) and cur or nil, root = root(), list = list }
+  local active = is_markdown(cur) and cur or nil
+  -- The cursor belongs to the current window; report its line only when that current
+  -- buffer is the markdown one on show, so the page never marks a line in the wrong doc.
+  local cursor = active and nx.cursor.get()[1] or nil
+  return { active = active, cursor = cursor, root = root(), list = list }
 end
 
 -- The raw markdown text of `buf`, or nil when it is not a listed markdown buffer. The

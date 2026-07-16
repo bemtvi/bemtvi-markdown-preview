@@ -48,6 +48,16 @@ nx.test.describe("nxvim-markdown-preview.page", function()
     nx.test.expect(html).to_contain("if (switched)")
   end)
 
+  nx.test.it("maps the editor cursor line to a rendered block and highlights it", function()
+    local html = page.html()
+    -- Blocks carry their source-line range …
+    nx.test.expect(html).to_contain('data-ls="')
+    nx.test.expect(html).to_contain("marked.lexer")
+    -- … and applyCursor marks the one containing the line, only for the active buffer.
+    nx.test.expect(html).to_contain("cursor-here")
+    nx.test.expect(html).to_contain("target.buf === data.active ? data.cursor : null")
+  end)
+
   nx.test.it("headers set the content type and a CSP", function()
     local h = page.headers()
     nx.test.expect(h["content-type"]).to_contain("text/html")

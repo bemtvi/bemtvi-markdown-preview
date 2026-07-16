@@ -80,6 +80,16 @@ nx.test.describe("nxvim-markdown-preview.server", function()
     nx.test.expect(nx.json.decode(request("/buffers").body).active).to_be_nil()
   end)
 
+  nx.test.it("reports the 1-based cursor line of the active markdown buffer", function(t)
+    open(t, DIR .. "/cur.md", { "# one", "para two", "para three", "para four" })
+    t:feed("3G") -- move the cursor to line 3
+    nx.test.expect(nx.json.decode(request("/buffers").body).cursor).to_be(3)
+
+    -- No cursor line when the current buffer is not markdown.
+    open(t, DIR .. "/plain.txt", { "a", "b" })
+    nx.test.expect(nx.json.decode(request("/buffers").body).cursor).to_be_nil()
+  end)
+
   nx.test.it("reports buffer names as ABSOLUTE paths, even when opened relatively", function(t)
     -- Opened by a RELATIVE name — nx.buf.name would return "rel.md", which the page must
     -- not use as a link base (it would resolve docs/x.md against /rel.md).
