@@ -31,6 +31,17 @@ local function basename(name)
   return name:match("[^/]+$") or name
 end
 
+-- A buffer's name made ABSOLUTE. `nx.buf.name` returns the name AS OPENED — often relative
+-- (`:edit README.md` -> `"README.md"`), which the page must not use as a link base or it
+-- resolves `docs/x.md` against `/README.md`. `":p"` joins it onto the cwd; an unnamed
+-- buffer stays `""` (never the bare cwd `":p"` would hand back for an empty name).
+local function abspath(name)
+  if name == nil or name == "" then
+    return ""
+  end
+  return vim.fn.fnamemodify(name, ":p")
+end
+
 -- Does this path *look* like markdown (by extension)? The classifier for a file the
 -- page links to but that is not (yet) an open buffer — so it has no `filetype`.
 local function md_ext(name)
@@ -75,7 +86,7 @@ function M.buffers()
   local list = {}
   for _, id in ipairs(nx.buf.list()) do
     if is_markdown(id) then
-      local name = nx.buf.name(id)
+      local name = abspath(nx.buf.name(id))
       list[#list + 1] = { id = id, name = name, label = basename(name) }
     end
   end

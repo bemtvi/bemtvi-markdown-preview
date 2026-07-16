@@ -80,6 +80,20 @@ nx.test.describe("nxvim-markdown-preview.server", function()
     nx.test.expect(nx.json.decode(request("/buffers").body).active).to_be_nil()
   end)
 
+  nx.test.it("reports buffer names as ABSOLUTE paths, even when opened relatively", function(t)
+    -- Opened by a RELATIVE name — nx.buf.name would return "rel.md", which the page must
+    -- not use as a link base (it would resolve docs/x.md against /rel.md).
+    t:cmd("cd " .. DIR)
+    t:cmd("edit rel.md")
+    nx.await(nx.buf.set_lines(0, 0, -1, false, { "# rel" }))
+
+    local e = entry_for(nx.json.decode(request("/buffers").body).list, nx.buf.current())
+    nx.test.expect(e).to_be_truthy()
+    nx.test.expect(e.name:sub(1, 1)).to_be("/") -- absolute, not "rel.md"
+    nx.test.expect(e.name).to_contain("/rel.md")
+    nx.test.expect(e.label).to_be("rel.md")
+  end)
+
   nx.test.it("/source returns the buffer's current text, no-store", function(t)
     local md = open(t, DIR .. "/edit.md", { "line one", "line two" })
     local res = request("/source", { buf = tostring(md) })

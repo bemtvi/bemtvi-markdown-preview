@@ -142,7 +142,8 @@ followEl.onclick = () => { location.hash = ""; };
 addEventListener("hashchange", tick);   // navigate at once, not only on the next poll
 
 // ----- path helpers (POSIX-style, no file:// needed) -----------------------
-const dirOf = (p) => p.replace(/\/[^/]*$/, "") || "";
+// The directory of `p`; "" when `p` has no slash (so a bare name is not treated as a dir).
+const dirOf = (p) => { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); };
 const baseName = (p) => p.replace(/\/+$/, "").split("/").pop();
 // Resolve a link target against the directory of the file it appears in, honouring a
 // leading "/" (absolute) and "."/".." segments.
