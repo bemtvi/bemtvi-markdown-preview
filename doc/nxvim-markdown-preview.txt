@@ -7,7 +7,8 @@ nxvim-markdown-preview is a live, in-browser markdown preview. It is an
 optional first-party plugin built entirely on the native nx.* plugin API.
 
 The editor serves your open buffers over a single |nx.http.mount|; the browser
-renders them (marked for markdown, mermaid for diagrams). One page previews
+renders them (marked for markdown, highlight.js for code-fence syntax
+highlighting across ~190 languages, mermaid for diagrams). One page previews
 EVERY open markdown buffer — a sidebar switches between them, and with nothing
 pinned the page follows the editor's active buffer.
 
@@ -49,9 +50,9 @@ repo, not the whole disk.
 A buffer counts as markdown when 'filetype' is "markdown", or its name ends in
 a markdown extension (.md, .markdown, .mdown, .mkd, .mdx, ...).
 
-Note: marked and mermaid load from the jsDelivr CDN, so the preview page needs
-internet for those two libraries. It renders your local buffers but pulls the
-renderer from a CDN.
+Note: marked, highlight.js, and mermaid load from the jsDelivr CDN, so the
+preview page needs internet for those libraries. It renders your local buffers
+but pulls the renderer from a CDN.
 
 ==============================================================================
 OPTIONS						*markdown-preview-options*

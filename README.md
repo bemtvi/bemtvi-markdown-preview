@@ -27,17 +27,19 @@ too — a Service Worker satisfies the same routes.
   — even one that **isn't open**, which the editor then reads straight from disk (no
   buffer needed). If the target *is* open, you get the live buffer instead. Relative and
   `../` links resolve against the file they appear in; external links open in a new tab.
-- **GFM + mermaid.** Tables, task lists, fenced code, and ` ```mermaid ` diagram blocks,
-  all rendered client-side.
+- **GFM + highlighting + mermaid.** Tables, task lists, syntax-highlighted fenced code
+  (highlight.js, ~190 languages — by the fence's language, else auto-detected), and
+  ` ```mermaid ` diagram blocks, all rendered client-side.
 - **Lazy.** Nothing opens a port until `:MarkdownPreview` — a config that installs this
   plugin but never previews binds no listener.
 
 A buffer counts as markdown when its `filetype` is `markdown`, or its name ends in a
 markdown extension (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mdx`, …).
 
-> **Network note:** marked and mermaid load from the jsDelivr CDN, so the preview page
-> needs internet for those two libraries (it renders your *local* buffers, but pulls the
-> *renderer* from a CDN). The mount's CSP confines the page to `'self'` plus jsDelivr.
+> **Network note:** marked, highlight.js, and mermaid load from the jsDelivr CDN, so the
+> preview page needs internet for those libraries (it renders your *local* buffers, but
+> pulls the *renderer* from a CDN). The mount's CSP confines the page to `'self'` plus
+> jsDelivr.
 
 ## Install
 

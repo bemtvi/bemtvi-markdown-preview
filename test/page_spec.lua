@@ -10,8 +10,18 @@ nx.test.describe("nxvim-markdown-preview.page", function()
     nx.test.expect(html).to_contain("cdn.jsdelivr.net/npm/marked")
     nx.test.expect(html).to_contain("mermaid")
     nx.test.expect(html).to_contain("marked.parse")
-    -- Code blocks fall back to marked's escaping renderer (return false), not a hand-rolled escape.
     nx.test.expect(html).to_contain('pre class="mermaid"')
+  end)
+
+  nx.test.it("syntax-highlights code fences with highlight.js", function()
+    local html = page.html()
+    nx.test.expect(html).to_contain("cdn.jsdelivr.net/npm/highlight.js")
+    -- By the fence's language when known (hljs.highlight), else auto-detected.
+    nx.test.expect(html).to_contain("hljs.getLanguage")
+    nx.test.expect(html).to_contain("hljs.highlightAuto")
+    -- The token themes are loaded (one per colour scheme).
+    nx.test.expect(html).to_contain("styles/github.min.css")
+    nx.test.expect(html).to_contain("styles/github-dark.min.css")
   end)
 
   nx.test.it("polls the mount's own relative endpoints", function()

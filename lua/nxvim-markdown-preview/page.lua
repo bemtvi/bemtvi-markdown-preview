@@ -1,8 +1,9 @@
 -- The preview page: one self-contained HTML document served at the mount root. All
 -- markdown rendering happens HERE, in the browser — the editor only serves bytes
--- (`/buffers`, `/source`). marked does the CommonMark/GFM parse and mermaid the diagram
--- fences, both loaded as ES modules from jsDelivr, so the page needs the network for
--- those two libraries (it renders your local buffers, but pulls the renderer from a CDN).
+-- (`/buffers`, `/source`). marked does the CommonMark/GFM parse, highlight.js the code-
+-- fence syntax highlighting (~190 languages), and mermaid the diagram fences — all loaded
+-- as ES modules from jsDelivr, so the page needs the network for those libraries (it
+-- renders your local buffers, but pulls the renderer from a CDN).
 --
 -- Escaping is the library's job, never ours: the code-block renderer returns `false` to
 -- fall back to marked's default (which HTML-escapes), and every dynamic value the page
@@ -29,7 +30,7 @@ local M = {}
 local CSP = table.concat({
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
   "img-src 'self' data:",
   "font-src 'self' data: https://cdn.jsdelivr.net",
   "connect-src 'self' https://cdn.jsdelivr.net",
@@ -53,6 +54,9 @@ local HTML = [==[
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>markdown preview</title>
+<!-- highlight.js token themes, one per colour scheme; each is a couple of KB. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -114,11 +118,17 @@ local HTML = [==[
 <script type="module">
 import { marked } from "https://cdn.jsdelivr.net/npm/marked/+esm";
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";   // ~190 languages
 
-// mermaid fences become <pre class="mermaid">; every other code block returns false so
-// marked's own (escaping) renderer handles it. No hand-rolled escape.
+// mermaid fences become <pre class="mermaid">; every other code block is syntax-highlighted
+// by highlight.js — by the fence's language when it names a known one, else auto-detected.
+// hljs.highlight()/highlightAuto() return HTML-escaped, span-wrapped markup, so escaping is
+// still the library's job, not ours.
 marked.use({ renderer: { code({ text, lang }) {
-  return lang === "mermaid" ? `<pre class="mermaid">${text}</pre>` : false;
+  if (lang === "mermaid") return `<pre class="mermaid">${text}</pre>`;
+  const language = lang && hljs.getLanguage(lang) ? lang : null;
+  const out = language ? hljs.highlight(text, { language }) : hljs.highlightAuto(text);
+  return `<pre><code class="hljs${language ? " language-" + language : ""}">${out.value}</code></pre>`;
 }}});
 marked.use({ gfm: true, breaks: false });
 mermaid.initialize({ startOnLoad: false });
