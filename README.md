@@ -23,6 +23,10 @@ too — a Service Worker satisfies the same routes.
 - **Multi-buffer.** One page previews **every** open markdown buffer. A sidebar lists
   them; click to switch. With nothing pinned it **follows** the editor's active buffer;
   "⟳ follow editor" clears a pin.
+- **Link navigation.** Clicking a markdown link inside the preview navigates to that file
+  — even one that **isn't open**, which the editor then reads straight from disk (no
+  buffer needed). If the target *is* open, you get the live buffer instead. Relative and
+  `../` links resolve against the file they appear in; external links open in a new tab.
 - **GFM + mermaid.** Tables, task lists, fenced code, and ` ```mermaid ` diagram blocks,
   all rendered client-side.
 - **Lazy.** Nothing opens a port until `:MarkdownPreview` — a config that installs this
@@ -86,9 +90,15 @@ Three endpoints, all mount-relative so they work under any origin:
 
 ```
 GET /            the page shell (marked + mermaid render client-side)
-GET /buffers     JSON { active, list } — the open markdown buffers, polled by the page
+GET /buffers     JSON { active, root, list } — the open markdown buffers, polled by the page
 GET /source?buf= that buffer's raw text, polled and rendered by the page
+GET /file?path=  a markdown file's text read from disk, for a link to a closed file
 ```
+
+`/file` is bounded to markdown files **inside the workspace** (`getcwd()`): the requested
+path and the root are both canonicalized (`nx.fs.realpath`, so a `..` walk or a symlink
+that escapes is refused, and `/var` vs `/private/var` can't fool the check), and a
+non-markdown or out-of-tree path is a 403. So a link can browse the repo, not the disk.
 
 Escaping is the library's job, never the plugin's: the page's code-block renderer returns
 `false` to fall back to marked's own (HTML-escaping) renderer, and every dynamic value

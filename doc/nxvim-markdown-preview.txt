@@ -39,6 +39,13 @@ pin it. "Follow editor" (top of the sidebar) clears the pin so the page tracks
 whichever buffer is active in the editor. Edits appear on the next poll
 (~500 ms); no :write is needed.
 
+Clicking a markdown link inside the preview navigates to that file — even one
+that is not open, which is read straight from disk (no buffer needed); if it is
+open, the live buffer is shown instead. Relative and ../ links resolve against
+the file they appear in; external links open in a new tab. Files read from disk
+are bounded to markdown inside the workspace ('getcwd()'), so a link browses the
+repo, not the whole disk.
+
 A buffer counts as markdown when 'filetype' is "markdown", or its name ends in
 a markdown extension (.md, .markdown, .mdown, .mkd, .mdx, ...).
 

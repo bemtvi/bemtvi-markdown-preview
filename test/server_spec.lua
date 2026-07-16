@@ -4,17 +4,15 @@
 
 local server = require("nxvim-markdown-preview.server")
 
--- Call the mount handler synchronously and return the response table it produced.
--- `server.handle` calls `respond` inline for every route, so the capture is set on return.
+-- Drive the mount handler and return the response table. Awaits, because some routes
+-- (`/file`) respond only after an async disk read; the sync routes resolve immediately.
 local function request(path, query)
-  local res
-  server.handle(
-    { method = "GET", path = path, query = query or {}, name = "nxvim-markdown-preview" },
-    function(r)
-      res = r
-    end
-  )
-  return res
+  return nx.await(nx.promise.new(function(resolve)
+    server.handle(
+      { method = "GET", path = path, query = query or {}, name = "nxvim-markdown-preview" },
+      resolve
+    )
+  end))
 end
 
 -- Open `path` in a fresh buffer with `lines` as its contents, and return its bufnr.
@@ -102,6 +100,46 @@ nx.test.describe("nxvim-markdown-preview.server", function()
     -- A real buffer that is not markdown is not addressable through /source either.
     local txt = open(t, DIR .. "/no.txt", { "x" })
     nx.test.expect(request("/source", { buf = tostring(txt) }).status).to_be(404)
+  end)
+
+  nx.test.it(
+    "classifies a path as markdown by extension alone (for links to closed files)",
+    function()
+      nx.test.expect(server._md_ext("/repo/docs/guide.md")).to_be_truthy()
+      nx.test.expect(server._md_ext("/repo/README.markdown")).to_be_truthy()
+      nx.test.expect(server._md_ext("/repo/notes.txt")).to_be_falsy()
+      nx.test.expect(server._md_ext("/repo/Makefile")).to_be_falsy()
+    end
+  )
+
+  nx.test.it("/file reads a markdown file from disk, even with no buffer open", function(t)
+    -- A file on disk that is NOT opened as a buffer, in a subdir of the workspace.
+    nx.await(nx.fs.mkdir(DIR .. "/docs"))
+    local path = DIR .. "/docs/linked.md"
+    nx.await(nx.fs.write(path, "# Linked\n\nfrom disk\n"))
+    t:cmd("cd " .. DIR) -- point the workspace root at DIR so the file is in-bounds
+
+    local res = request("/file", { path = path })
+    nx.test.expect(res.status or 200).to_be(200)
+    nx.test.expect(res.body).to_contain("# Linked")
+    nx.test.expect(res.headers["cache-control"]).to_be("no-store")
+  end)
+
+  nx.test.it("/file refuses a non-markdown file, an escape, and a missing path", function(t)
+    t:cmd("cd " .. DIR)
+    nx.await(nx.fs.write(DIR .. "/notes.txt", "secret"))
+    -- Non-markdown extension: refused before any disk read.
+    nx.test.expect(request("/file", { path = DIR .. "/notes.txt" }).status).to_be(403)
+    -- Missing / non-string path.
+    nx.test.expect(request("/file", {}).status).to_be(403)
+    -- A real markdown file OUTSIDE the workspace: it resolves (so this exercises the
+    -- containment check, not a read miss) but is refused. Canonicalizing both sides is
+    -- what stops /var vs /private/var from fooling the bound.
+    local outside = nx.test.tempdir() .. "/elsewhere.md"
+    nx.await(nx.fs.write(outside, "# not yours\n"))
+    nx.test.expect(request("/file", { path = outside }).status).to_be(403)
+    -- In-bounds name but no such file: a 404, not a 200.
+    nx.test.expect(request("/file", { path = DIR .. "/nope.md" }).status).to_be(404)
   end)
 
   nx.test.it("/ serves the HTML page with a CSP, and unknown paths 404", function()

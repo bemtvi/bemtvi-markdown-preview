@@ -10,8 +10,14 @@
 -- hand-rolls an escape.
 --
 -- Multi-buffer: the page polls `/buffers` for the open markdown buffers and renders one.
--- With no `#id` in the URL it FOLLOWS the editor's active buffer; clicking a buffer in
--- the sidebar pins it (sets the hash); "⟳ follow editor" clears the pin.
+-- With no hash in the URL it FOLLOWS the editor's active buffer; the sidebar pins a buffer
+-- (`#b:<id>`); "⟳ follow editor" clears the pin.
+--
+-- Link navigation: a click on a markdown link inside the rendered doc navigates the
+-- preview to that file (`#f:<abs path>`) instead of the browser leaving the page — even
+-- when the target is not an open buffer, in which case `/file` reads it straight from
+-- disk. If the linked file *is* open, the page renders the live buffer instead. External
+-- links open in a new tab; in-page `#anchor` links are left alone.
 
 local M = {}
 
@@ -70,6 +76,8 @@ local HTML = [==[
   .buf.sel { background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
   .buf .dot { opacity: 0; margin-right: .4rem; }
   .buf.active .dot { opacity: .9; color: #3fb950; }
+  .buf.disk { font-style: italic; }
+  .buf.disk .dot { opacity: .6; }
   #follow {
     margin: .8rem .4rem 0; font-size: .72rem; opacity: .6; cursor: pointer;
     background: none; border: 0; color: inherit; padding: .3rem 0;
@@ -120,87 +128,148 @@ const listEl = document.getElementById("buflist");
 const mainEl = document.getElementById("main");
 const followEl = document.getElementById("follow");
 
-// The pinned buffer id (from the URL hash), or null to FOLLOW the editor's active buffer.
-function pinned() {
-  const h = location.hash.slice(1);
-  return h ? Number(h) : null;
+const MD_RE = /\.(md|markdown|mdown|mkd|mkdn|mdx)$/i;
+
+// ----- selection (the URL hash) --------------------------------------------
+// #b:<id>  a live buffer   |   #f:<abs path>  a file read from disk   |   (none) follow.
+function parseSel() {
+  const raw = location.hash.slice(1);
+  if (raw.startsWith("b:")) { const id = Number(raw.slice(2)); return Number.isFinite(id) ? { buf: id } : null; }
+  if (raw.startsWith("f:")) return { file: decodeURIComponent(raw.slice(2)) };
+  return null;   // follow the editor's active buffer
 }
 followEl.onclick = () => { location.hash = ""; };
+addEventListener("hashchange", tick);   // navigate at once, not only on the next poll
 
-let shownId = null;    // the buffer currently rendered
-let shownText = null;  // its last-rendered text, so we only re-render on change
-let listKey = null;    // signature of the last sidebar, so we only rebuild on change
+// ----- path helpers (POSIX-style, no file:// needed) -----------------------
+const dirOf = (p) => p.replace(/\/[^/]*$/, "") || "";
+const baseName = (p) => p.replace(/\/+$/, "").split("/").pop();
+// Resolve a link target against the directory of the file it appears in, honouring a
+// leading "/" (absolute) and "."/".." segments.
+function resolvePath(baseDir, href) {
+  href = decodeURIComponent(href.split(/[?#]/)[0]);
+  const stack = href.startsWith("/") ? [] : baseDir.split("/").filter(Boolean);
+  for (const seg of href.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") stack.pop();
+    else stack.push(seg);
+  }
+  return "/" + stack.join("/");
+}
+
+// ----- render --------------------------------------------------------------
+let shownKey = null;   // "b:<id>" / "f:<path>" of what is rendered, for change detection
+let shownText = null;  // its last text, so an unchanged poll does not re-render
+let shownPath = null;  // the rendered doc's absolute path, the base for link resolution
+let listKey = null;    // signature of the last sidebar, so we only rebuild on a change
 
 function setStatus(s) { statusEl.textContent = s; }
 
-// Rebuild the sidebar from /buffers. textContent for labels — no escaping by hand.
-function renderList(data, selId) {
-  const key = JSON.stringify([data.list.map(b => [b.id, b.label]), data.active, selId]);
+// Fetch `url` and render it, unless its text is unchanged from last time. Returns false
+// when the source is gone (a closed buffer, an unreadable file) so the caller can react.
+async function renderFrom(url, key, path) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) { if (key === shownKey) { shownKey = null; shownText = null; } return false; }
+  const md = await res.text();
+  shownPath = path;
+  if (key === shownKey && md === shownText) return true;
+  shownKey = key; shownText = md;
+  mainEl.innerHTML = marked.parse(md);
+  await mermaid.run({ nodes: mainEl.querySelectorAll("pre.mermaid") });
+  return true;
+}
+
+function showEmpty(msg) {
+  shownKey = null; shownText = null; shownPath = null;
+  const p = document.createElement("p"); p.id = "empty"; p.textContent = msg;
+  mainEl.replaceChildren(p);
+}
+
+// Rebuild the sidebar: the open buffers, plus — when we are viewing a linked file that is
+// NOT open — one italic entry for it, so the selection is always legible. textContent for
+// every label, so nothing is escaped by hand.
+function renderList(data, sel, diskFile) {
+  const key = JSON.stringify([data.list.map(b => [b.id, b.label]), data.active, sel, diskFile]);
   if (key === listKey) return;
   listKey = key;
   listEl.replaceChildren();
   for (const b of data.list) {
     const btn = document.createElement("button");
-    btn.className = "buf" + (b.id === selId ? " sel" : "") + (b.id === data.active ? " active" : "");
-    btn.onclick = () => { location.hash = String(b.id); };
-    const dot = document.createElement("span");
-    dot.className = "dot";
-    dot.textContent = "●";
+    btn.className = "buf" + (sel && sel.buf === b.id ? " sel" : "") + (b.id === data.active ? " active" : "");
+    btn.onclick = () => { location.hash = "b:" + b.id; };
+    const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = "●";
     btn.append(dot, document.createTextNode(b.label));
     btn.title = b.name || b.label;
     listEl.append(btn);
   }
-  if (data.list.length === 0) {
-    const p = document.createElement("p");
-    p.id = "empty";
-    p.textContent = "no markdown buffers open";
+  if (diskFile) {
+    const btn = document.createElement("button");
+    btn.className = "buf disk sel";
+    btn.onclick = () => { location.hash = "f:" + encodeURIComponent(diskFile); };
+    const dot = document.createElement("span"); dot.className = "dot"; dot.textContent = "○";
+    btn.append(dot, document.createTextNode(baseName(diskFile)));
+    btn.title = diskFile + "  (from disk — not open as a buffer)";
+    listEl.append(btn);
+  }
+  if (data.list.length === 0 && !diskFile) {
+    const p = document.createElement("p"); p.id = "empty"; p.textContent = "no markdown buffers open";
     listEl.append(p);
   }
 }
 
-async function renderDoc(id) {
-  const res = await fetch("source?buf=" + id, { cache: "no-store" });
-  if (!res.ok) {                     // the buffer closed out from under us
-    if (id === shownId) { shownId = null; shownText = null; }
-    return;
-  }
-  const md = await res.text();
-  if (id === shownId && md === shownText) return;   // unchanged — skip the re-render
-  shownId = id; shownText = md;
-  mainEl.innerHTML = marked.parse(md);
-  await mermaid.run({ nodes: mainEl.querySelectorAll("pre.mermaid") });
-}
+// A click on a link inside the rendered doc. External links open in a new tab; an in-page
+// anchor is left alone; a link to a MARKDOWN file navigates the preview (pinning it as a
+// disk file — a tick then prefers the live buffer if that file happens to be open).
+mainEl.addEventListener("click", (e) => {
+  const a = e.target.closest("a");
+  if (!a) return;
+  const href = a.getAttribute("href") || "";
+  if (!href || href.startsWith("#")) return;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { a.target = "_blank"; a.rel = "noopener"; return; }
+  if (!shownPath) return;                          // no base path to resolve against
+  const path = resolvePath(dirOf(shownPath), href);
+  if (!MD_RE.test(path)) return;                   // only markdown links drive the preview
+  e.preventDefault();
+  location.hash = "f:" + encodeURIComponent(path);
+});
 
-function showEmpty(msg) {
-  shownId = null; shownText = null;
-  const p = document.createElement("p");
-  p.id = "empty";
-  p.textContent = msg;
-  mainEl.replaceChildren(p);
-}
-
+// ----- poll ----------------------------------------------------------------
 async function tick() {
   try {
     const data = await (await fetch("buffers", { cache: "no-store" })).json();
-    const pin = pinned();
-    followEl.textContent = pin === null ? "⟳ following editor" : "⟳ follow editor";
-    followEl.classList.toggle("on", pin === null);
+    const sel = parseSel();
+    followEl.textContent = sel === null ? "⟳ following editor" : "⟳ follow editor";
+    followEl.classList.toggle("on", sel === null);
 
-    // Which buffer to show: the pin if it is still open, else the editor's active
-    // markdown buffer, else the first one in the list.
-    const ids = new Set(data.list.map(b => b.id));
-    let sel = pin !== null && ids.has(pin) ? pin
-      : (data.active != null ? data.active
-      : (data.list[0] ? data.list[0].id : null));
+    // Resolve the selection to a concrete target. A file selection prefers the LIVE
+    // buffer when that path is already open (so unsaved edits show), else reads disk.
+    const byName = new Map(data.list.map(b => [b.name, b]));
+    let target = null, effSel = null, diskFile = null;
+    if (sel && sel.file) {
+      const open = byName.get(sel.file);
+      if (open) { target = { buf: open.id }; effSel = { buf: open.id }; }
+      else { target = { file: sel.file }; diskFile = sel.file; }
+    } else if (sel && sel.buf != null && data.list.some(b => b.id === sel.buf)) {
+      target = { buf: sel.buf }; effSel = target;
+    } else if (data.active != null) {
+      target = { buf: data.active }; effSel = target;
+    } else if (data.list[0]) {
+      target = { buf: data.list[0].id }; effSel = target;
+    }
 
-    renderList(data, sel);
-    if (sel === null) {
+    renderList(data, effSel, diskFile);
+
+    if (!target) {
       showEmpty("no markdown buffers open");
       document.title = "markdown preview";
+    } else if (target.buf != null) {
+      const b = data.list.find(x => x.id === target.buf);
+      await renderFrom("source?buf=" + target.buf, "b:" + target.buf, b ? b.name : null);
+      document.title = (b ? b.label : "buffer " + target.buf) + " — preview";
     } else {
-      await renderDoc(sel);
-      const b = data.list.find(x => x.id === sel);
-      document.title = (b ? b.label : "buffer " + sel) + " — preview";
+      const ok = await renderFrom("file?path=" + encodeURIComponent(target.file), "f:" + target.file, target.file);
+      if (!ok) showEmpty("cannot read " + target.file);
+      document.title = baseName(target.file) + " — preview";
     }
     setStatus("live");
   } catch (e) {

@@ -31,6 +31,13 @@ local function basename(name)
   return name:match("[^/]+$") or name
 end
 
+-- Does this path *look* like markdown (by extension)? The classifier for a file the
+-- page links to but that is not (yet) an open buffer — so it has no `filetype`.
+local function md_ext(name)
+  local ext = tostring(name):lower():match("%.([%w.]+)$")
+  return ext ~= nil and MD_EXT[ext] == true
+end
+
 -- Is `buf` a markdown buffer? `filetype == "markdown"` is the primary signal (the user
 -- set it, or the editor derived it); the extension is the fallback for a listed buffer
 -- that has never been entered and so has no filetype yet.
@@ -41,14 +48,28 @@ local function is_markdown(buf)
   if nx.buf.get_option(buf, "filetype") == "markdown" then
     return true
   end
-  local ext = nx.buf.name(buf):lower():match("%.([%w.]+)$")
-  return ext ~= nil and MD_EXT[ext] == true
+  return md_ext(nx.buf.name(buf))
 end
 
--- `M.buffers()` -> `{ active = <bufnr|nil>, list = { { id, name, label }, ... } }`
+-- The workspace root that bounds `/file`: the editor's cwd (a `--workspace` launch cds
+-- here at boot; a daemon session cds on the remote). `/file` serves markdown UNDER this
+-- and nothing else, so a link cannot walk the mount out to arbitrary disk.
+local function root()
+  return vim.fn.getcwd()
+end
+
+-- Is `canon` (an already-canonical path) inside `root_canon`? Plain prefix test, correct
+-- only because BOTH sides came through `nx.fs.realpath` — symlinks and `..` resolved — so
+-- `/var/folders/...` vs its `/private/var/...` real path cannot disagree.
+local function contains(root_canon, canon)
+  return canon == root_canon or canon:sub(1, #root_canon + 1) == root_canon .. "/"
+end
+
+-- `M.buffers()` -> `{ active = <bufnr|nil>, root = <cwd>, list = { { id, name, label }, ... } }`
 --
 -- Every open markdown buffer, ascending, plus which one the editor currently shows
--- (`active`, nil when the current buffer is not markdown). The page renders `active` in
+-- (`active`, nil when the current buffer is not markdown) and the workspace `root` (so
+-- the page can label a linked disk file relative to it). The page renders `active` in
 -- follow mode and lists `list` in the sidebar.
 function M.buffers()
   local list = {}
@@ -59,7 +80,7 @@ function M.buffers()
     end
   end
   local cur = nx.buf.current()
-  return { active = is_markdown(cur) and cur or nil, list = list }
+  return { active = is_markdown(cur) and cur or nil, root = root(), list = list }
 end
 
 -- The raw markdown text of `buf`, or nil when it is not a listed markdown buffer. The
@@ -79,14 +100,44 @@ local JSON =
   { ["content-type"] = "application/json; charset=utf-8", ["cache-control"] = "no-store" }
 local TEXT = { ["content-type"] = "text/plain; charset=utf-8", ["cache-control"] = "no-store" }
 
+-- Serve a markdown file by absolute `path`, read from DISK — for a link to a file that is
+-- not open as a buffer. Bounded to markdown inside the workspace: a non-markdown name is
+-- refused up front (403), and the path is canonicalized alongside the root and checked for
+-- containment (403 when it escapes — a `..` walk or a symlink pointing out), so a request
+-- off the wire cannot reach arbitrary disk. A path that cannot be read is a 404.
+local function serve_file(path, respond)
+  if type(path) ~= "string" or not md_ext(path) then
+    respond({ status = 403, headers = TEXT, body = "not a markdown file\n" })
+    return
+  end
+  nx.fs
+    .realpath(root())
+    :next(function(root_canon)
+      return nx.fs.realpath(path):next(function(canon)
+        if not contains(root_canon, canon) then
+          respond({ status = 403, headers = TEXT, body = "outside the workspace\n" })
+        else
+          return nx.fs.read_text(path):next(function(text)
+            respond({ headers = TEXT, body = text })
+          end)
+        end
+      end)
+    end)
+    :catch(function()
+      respond({ status = 404, headers = TEXT, body = "cannot read: " .. tostring(path) .. "\n" })
+    end)
+end
+
 -- `M.handle(req, respond)` — the mount's `on_request`. Routes on `req.path`, which is
 -- MOUNT-RELATIVE (a GET of `/plugin/<name>/source` arrives here as `"/source"`), so the
 -- same routing works under any origin — the native port and the web Service Worker
 -- alike.
 --
 --   "/"          the page shell (marked + mermaid render client-side)
---   "/buffers"   JSON { active, list } — the open markdown buffers, polled by the page
+--   "/buffers"   JSON { active, root, list } — the open markdown buffers, polled by the page
 --   "/source"    ?buf=<n> — that buffer's raw text, polled and rendered by the page
+--   "/file"      ?path=<abs> — a markdown file's text read from DISK, for a link to a
+--                file that is not open as a buffer. Bounded to markdown under `root()`.
 --
 -- Anything else is the plugin's own 404 (the editor only 404s a name that is not
 -- mounted at all).
@@ -103,6 +154,8 @@ function M.handle(req, respond)
     else
       respond({ headers = TEXT, body = text })
     end
+  elseif req.path == "/file" then
+    serve_file(req.query and req.query.path, respond)
   else
     respond({ status = 404, headers = TEXT, body = "no such page: " .. req.path .. "\n" })
   end
@@ -111,5 +164,6 @@ end
 -- Exposed for the specs (pure helpers otherwise local to routing).
 M._is_markdown = is_markdown
 M._basename = basename
+M._md_ext = md_ext
 
 return M

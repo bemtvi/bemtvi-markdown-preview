@@ -18,7 +18,17 @@ nx.test.describe("nxvim-markdown-preview.page", function()
     local html = page.html()
     -- Relative (no leading slash), so it works under the mount prefix on any origin.
     nx.test.expect(html).to_contain('fetch("buffers"')
-    nx.test.expect(html).to_contain('fetch("source?buf=')
+    nx.test.expect(html).to_contain('"source?buf="')
+    -- Links to closed files navigate through /file.
+    nx.test.expect(html).to_contain('"file?path="')
+  end)
+
+  nx.test.it("navigates markdown links and pins them in the URL hash", function()
+    local html = page.html()
+    nx.test.expect(html).to_contain("MD_RE")
+    nx.test.expect(html).to_contain('"f:" + encodeURIComponent')
+    -- External links open in a new tab rather than navigating the preview.
+    nx.test.expect(html).to_contain('a.target = "_blank"')
   end)
 
   nx.test.it("headers set the content type and a CSP", function()
