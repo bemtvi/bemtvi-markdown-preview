@@ -184,9 +184,12 @@ async function renderFrom(url, key, path) {
   const md = await res.text();
   shownPath = path;
   if (key === shownKey && md === shownText) return true;
+  const switched = key !== shownKey;   // a different doc, not just a live edit of this one
   shownKey = key; shownText = md;
   mainEl.innerHTML = marked.parse(md);
   await mermaid.run({ nodes: mainEl.querySelectorAll("pre.mermaid") });
+  // Switching documents starts at the top; an edit to the SAME doc keeps your place.
+  if (switched) scrollTo(0, 0);
   return true;
 }
 

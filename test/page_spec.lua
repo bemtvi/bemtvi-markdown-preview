@@ -41,6 +41,13 @@ nx.test.describe("nxvim-markdown-preview.page", function()
     nx.test.expect(html).to_contain('a.target = "_blank"')
   end)
 
+  nx.test.it("scrolls to the top when the document switches, not on a live edit", function()
+    local html = page.html()
+    nx.test.expect(html).to_contain("scrollTo(0, 0)")
+    -- Gated on a real switch (key change), so an edit to the same doc keeps the position.
+    nx.test.expect(html).to_contain("if (switched)")
+  end)
+
   nx.test.it("headers set the content type and a CSP", function()
     local h = page.headers()
     nx.test.expect(h["content-type"]).to_contain("text/html")
