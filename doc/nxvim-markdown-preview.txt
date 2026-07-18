@@ -40,6 +40,12 @@ pin it. "Follow editor" (top of the sidebar) clears the pin so the page tracks
 whichever buffer is active in the editor. Edits appear on the next poll
 (~500 ms); no :write is needed.
 
+The block under the editor's cursor is highlighted in the preview. The "follow
+cursor" toggle at the bottom of the sidebar (remembered across reloads) also
+scrolls that block into view as the cursor moves; turn it off to keep the
+preview where you left it. The highlight and the scroll only apply while the
+page is showing the editor's active buffer.
+
 Clicking a markdown link inside the preview navigates to that file — even one
 that is not open, which is read straight from disk (no buffer needed); if it is
 open, the live buffer is shown instead. Relative and ../ links resolve against

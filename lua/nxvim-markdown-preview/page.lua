@@ -17,6 +17,8 @@
 -- Cursor line: each block is wrapped with its source-line range, so the editor's cursor
 -- line (polled from `/buffers`) is mapped back to a rendered block and highlighted — but
 -- only while the page is showing the editor's ACTIVE buffer, the one the cursor is in.
+-- A "⭱ follow cursor" toggle (remembered in localStorage) additionally scrolls that block
+-- into view as the cursor moves; off by the user's choice, it just highlights.
 --
 -- Link navigation: a click on a markdown link inside the rendered doc navigates the
 -- preview to that file (`#f:<abs path>`) instead of the browser leaving the page — even
@@ -86,12 +88,13 @@ local HTML = [==[
   .buf.active .dot { opacity: .9; color: #3fb950; }
   .buf.disk { font-style: italic; }
   .buf.disk .dot { opacity: .6; }
-  #follow {
-    margin: .8rem .4rem 0; font-size: .72rem; opacity: .6; cursor: pointer;
-    background: none; border: 0; color: inherit; padding: .3rem 0;
+  #follow, #cursorfollow {
+    display: block; margin: 0 .4rem; font-size: .72rem; opacity: .6; cursor: pointer;
+    background: none; border: 0; color: inherit; padding: .3rem 0; text-align: left;
   }
-  #follow:hover { opacity: 1; }
-  #follow.on { color: #3fb950; opacity: .9; }
+  #follow { margin-top: .8rem; }
+  #follow:hover, #cursorfollow:hover { opacity: 1; }
+  #follow.on, #cursorfollow.on { color: #3fb950; opacity: .9; }
   #main { flex: 1 1 auto; min-width: 0; padding: 2rem 2.2rem; max-width: 52rem; }
   /* Each top-level block is wrapped so it can carry its source-line range and take the
      cursor-line highlight; the negative margin keeps its text aligned with the rest. */
@@ -120,6 +123,7 @@ local HTML = [==[
     <h2>markdown buffers</h2>
     <div id="buflist"></div>
     <button id="follow" title="Render whichever buffer is active in the editor"></button>
+    <button id="cursorfollow" title="Scroll to keep the editor's cursor line in view"></button>
   </nav>
   <article id="main"><p id="empty">loading…</p></article>
 </div>
@@ -145,8 +149,26 @@ const statusEl = document.getElementById("status");
 const listEl = document.getElementById("buflist");
 const mainEl = document.getElementById("main");
 const followEl = document.getElementById("follow");
+const cursorFollowEl = document.getElementById("cursorfollow");
 
 const MD_RE = /\.(md|markdown|mdown|mkd|mkdn|mdx)$/i;
+
+// ----- cursor-follow toggle (auto-scroll) ----------------------------------
+// When on, the preview scrolls to keep the editor's cursor line in view. A user choice,
+// remembered across reloads; default on. Toggling on re-scrolls to the current cursor.
+let autoScroll = localStorage.getItem("nxmp.autoscroll") !== "0";
+let lastCursorLine = null;   // the last line applyCursor scrolled for; null re-arms a scroll
+function renderCursorFollow() {
+  cursorFollowEl.textContent = autoScroll ? "⭱ following cursor" : "⭱ follow cursor";
+  cursorFollowEl.classList.toggle("on", autoScroll);
+}
+cursorFollowEl.onclick = () => {
+  autoScroll = !autoScroll;
+  localStorage.setItem("nxmp.autoscroll", autoScroll ? "1" : "0");
+  lastCursorLine = null;   // so enabling scrolls to the cursor on the next poll
+  renderCursorFollow();
+};
+renderCursorFollow();
 
 // ----- selection (the URL hash) --------------------------------------------
 // #b:<id>  a live buffer   |   #f:<abs path>  a file read from disk   |   (none) follow.
@@ -222,7 +244,9 @@ async function renderFrom(url, key, path) {
 
 // Mark the block that holds source `line` (1-based) as the cursor line; `null` clears it.
 // Cheap enough to run every poll — the cursor moves without the text changing, so this is
-// separate from the re-render.
+// separate from the re-render. When cursor-follow is on, scroll that block into view — but
+// only when the line actually CHANGED, so a user who scrolls away while the cursor sits
+// still is not yanked back every poll; the follow resumes on the next cursor move.
 function applyCursor(line) {
   const blocks = mainEl.querySelectorAll(".blk");
   let hit = null;
@@ -232,6 +256,10 @@ function applyCursor(line) {
     }
   }
   for (const b of blocks) b.classList.toggle("cursor-here", b === hit);
+  if (autoScroll && hit && line !== lastCursorLine) {
+    hit.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  lastCursorLine = line;
 }
 
 function showEmpty(msg) {

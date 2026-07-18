@@ -23,6 +23,9 @@ too — a Service Worker satisfies the same routes.
 - **Multi-buffer.** One page previews **every** open markdown buffer. A sidebar lists
   them; click to switch. With nothing pinned it **follows** the editor's active buffer;
   "⟳ follow editor" clears a pin.
+- **Cursor line.** The block under the editor's cursor is highlighted in the preview.
+  "⭱ follow cursor" (a sidebar toggle, remembered across reloads) additionally scrolls
+  that block into view as the cursor moves — turn it off and the preview stays put.
 - **Link navigation.** Clicking a markdown link inside the preview navigates to that file
   — even one that **isn't open**, which the editor then reads straight from disk (no
   buffer needed). If the target *is* open, you get the live buffer instead. Relative and

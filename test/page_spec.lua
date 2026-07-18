@@ -58,6 +58,17 @@ nx.test.describe("nxvim-markdown-preview.page", function()
     nx.test.expect(html).to_contain("target.buf === data.active ? data.cursor : null")
   end)
 
+  nx.test.it("offers a cursor-follow auto-scroll toggle, persisted and default on", function()
+    local html = page.html()
+    nx.test.expect(html).to_contain('id="cursorfollow"')
+    -- Remembered across reloads; default on (only "0" disables).
+    nx.test.expect(html).to_contain('localStorage.getItem("nxmp.autoscroll") !== "0"')
+    nx.test.expect(html).to_contain('localStorage.setItem("nxmp.autoscroll"')
+    -- Scrolls the cursor block into view, gated on the toggle and a real line change.
+    nx.test.expect(html).to_contain("hit.scrollIntoView")
+    nx.test.expect(html).to_contain("autoScroll && hit && line !== lastCursorLine")
+  end)
+
   nx.test.it("headers set the content type and a CSP", function()
     local h = page.headers()
     nx.test.expect(h["content-type"]).to_contain("text/html")
