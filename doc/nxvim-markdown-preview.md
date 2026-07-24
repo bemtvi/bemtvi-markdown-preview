@@ -1,0 +1,113 @@
+<!-- DO NOT EDIT doc/nxvim-markdown-preview.txt BY HAND. It is generated from this file
+by panvimdoc — run `scripts/gen-vimdoc.sh` after editing. -->
+
+A live, in-browser markdown preview for nxvim — an optional first-party plugin built entirely on
+the native `nx.*` plugin API (ADR 0002): no core changes.
+
+The editor serves your open buffers over a single `nx.http.mount`; the browser renders them (marked
+for markdown, highlight.js for code-fence syntax highlighting across ~190 languages, mermaid for
+diagrams). Because it is a mount (a subroute on the editor's one origin) and not a bound port, the
+identical plugin runs on the web build too — a Service Worker satisfies the same routes. One page
+previews EVERY open markdown buffer — a sidebar switches between them, and with nothing pinned the
+page follows the editor's active buffer.
+
+```
+:MarkdownPreview        Mount (lazily) and open the preview in your browser.
+:MarkdownPreviewStop    Retire the mount (open tabs show "editor gone").
+:MarkdownPreviewToggle  Open if stopped, stop if open.
+```
+
+<!-- Passed through verbatim so `:help nxvim-markdown-preview` lands on this page
+     (panvimdoc derives per-section tags but no bare project tag). -->
+```vimdoc
+                            *nxvim-markdown-preview* *markdown-preview-intro*
+```
+
+# Usage
+
+- `:MarkdownPreview` — bind the mount if it is not up yet (nothing opens a port before this), then
+  open the preview in your browser. The page follows the current buffer, so it works from whichever
+  markdown file is focused. Reusing the command re-opens the browser at the same stable URL.
+- `:MarkdownPreviewStop` — close the mount. The URL starts 404ing and open tabs show "editor gone".
+  Reopening rebinds under the same name.
+- `:MarkdownPreviewToggle` — open the preview if it is stopped, stop it if open.
+
+In the browser: the left sidebar lists the open markdown buffers — click one to pin it. "Follow
+editor" (top of the sidebar) clears the pin so the page tracks whichever buffer is active in the
+editor. Edits appear on the next poll (~500 ms); no `:write` is needed. Rendering is the browser's
+job; the editor only serves bytes.
+
+The block under the editor's cursor is highlighted in the preview. The "follow cursor" toggle at the
+bottom of the sidebar (remembered across reloads) also scrolls that block into view as the cursor
+moves; turn it off to keep the preview where you left it. The highlight and the scroll only apply
+while the page is showing the editor's active buffer.
+
+Clicking a markdown link inside the preview navigates to that file — even one that is not open,
+which is read straight from disk (no buffer needed); if it is open, the live buffer is shown
+instead. Relative and `../` links resolve against the file they appear in; external links open in a
+new tab. Files read from disk are bounded to markdown inside the workspace (`getcwd()`), so a link
+browses the repo, not the whole disk.
+
+A buffer counts as markdown when its `filetype` is `markdown`, or its name ends in a markdown
+extension (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mdx`, …).
+
+# Options
+
+WHERE the preview listens is your call, not the plugin's — the `'httphost'` and `'httpport'`
+options, read when the mount binds. The default is an ephemeral loopback port (`127.0.0.1`,
+`'httpport'` = 0). Pin a stable, bookmarkable one:
+
+```lua
+nx.o.httpport = 8080          -- 0 (default) picks a free port
+-- nx.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
+```
+
+# Setup
+
+With `:Plugins` the plugin is on the runtimepath and `setup()` runs automatically (from
+`plugin/nxvim-markdown-preview.lua`), so the commands exist out of the box. Calling it yourself is
+harmless — it only registers the commands, it never binds a mount:
+
+```lua
+require("nxvim-markdown-preview").setup()
+```
+
+A leader map, if you like:
+
+```lua
+nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
+```
+
+# The mount
+
+The plugin is two small modules over the mount — `server.lua` (which buffers are markdown, and the
+`on_request` routing, pure over editor state) and `page.lua` (the self-contained preview page:
+marked + highlight.js + mermaid, client-side). Three endpoints, all mount-relative so they work
+under any origin:
+
+```
+GET /            the page shell (marked + highlight.js + mermaid render client-side)
+GET /buffers     JSON { active, root, list } — the open markdown buffers, polled by the page
+GET /source?buf= that buffer's raw text, polled and rendered by the page
+GET /file?path=  a markdown file's text read from disk, for a link to a closed file
+```
+
+`/file` is bounded to markdown files inside the workspace (`getcwd()`): the requested path and the
+root are both canonicalized (`nx.fs.realpath`, so a `..` walk or a symlink that escapes is refused,
+and `/var` vs `/private/var` can't fool the check), and a non-markdown or out-of-tree path is a 403.
+So a link can browse the repo, not the disk.
+
+# Notes
+
+marked, highlight.js, and mermaid load from the jsDelivr CDN, so the preview page needs internet for
+those libraries. It renders your local buffers but pulls the renderer from a CDN; the mount's CSP
+confines the page to `'self'` plus jsDelivr.
+
+Escaping is the library's job, never the plugin's: the page's code-block renderer falls back to
+marked's own (HTML-escaping) renderer, and every dynamic value (buffer labels, error text) is
+written through `textContent`.
+
+Security: `nx.http.mount` mounts share one origin, so the same-origin policy does not isolate one
+mount from another — a mount is a trust boundary between the editor and the network, not between
+plugins. The preview renders content you are actively editing (your own buffers); marked does not
+sanitize, so raw HTML in a buffer renders, as expected for a preview of your own documents.
