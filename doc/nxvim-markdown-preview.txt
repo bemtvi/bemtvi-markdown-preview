@@ -8,6 +8,7 @@ Table of Contents                   *nxvim-markdown-preview-table-of-contents*
 3. Setup                                        |nxvim-markdown-preview-setup|
 4. The mount                                |nxvim-markdown-preview-the-mount|
 5. Notes                                        |nxvim-markdown-preview-notes|
+
 A live, in-browser markdown preview for nxvim — an optional first-party
 plugin built entirely on the native `nx.*` plugin API (ADR 0002): no core
 changes.
