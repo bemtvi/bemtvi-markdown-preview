@@ -29,6 +29,9 @@ local function notify(msg, level)
   nx.notify("nxvim-markdown-preview: " .. msg, level)
 end
 
+-- A rejection handler for a chain whose failure is already reported elsewhere.
+local function ignore() end
+
 -- Bind the mount if it is not up yet, resolving with the handle either way. Idempotent:
 -- returns the live handle, or the in-flight bind, or starts one.
 local function ensure_mount()
@@ -59,6 +62,12 @@ end
 function M.open()
   ensure_mount()
     :next(function(m)
+      -- A :MarkdownPreviewStop that landed while this bind was in flight retires the
+      -- mount the moment it comes up. Say so rather than opening a browser tab on a URL
+      -- that is already 404ing; running :MarkdownPreview again binds a fresh one.
+      if not m:is_open() then
+        return notify("the preview was stopped before it finished starting")
+      end
       nx.ui.open(m:url())
       notify("preview open at " .. m:url())
     end)
@@ -71,6 +80,22 @@ end
 -- :MarkdownPreviewStop — retire the mount. The URL starts 404ing; open tabs show
 -- "editor gone". Reopening rebinds under the same name (a stable, bookmarkable URL).
 function M.stop()
+  -- A bind still in flight has no handle to close yet, and reporting "no preview is
+  -- running" would be a lie that leaves a mount coming up behind the user's back. Chain
+  -- the close onto the bind instead, so the stop lands whenever the mount does.
+  if pending then
+    -- A bind that never came up is already reported by whoever asked to open it, so this
+    -- chain — which only ever has a mount to close — swallows that same rejection.
+    pending
+      :next(function(m)
+        if mount == m then
+          mount = nil
+        end
+        m:close()
+      end)
+      :catch(ignore)
+    return notify("preview stopped (it was still starting)")
+  end
   if not (mount and mount:is_open()) then
     return notify("no preview is running")
   end

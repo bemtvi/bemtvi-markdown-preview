@@ -11,7 +11,10 @@ for fenced-code syntax, [mermaid](https://mermaid.js.org) for diagrams). Because
 runs on the web build too — a Service Worker satisfies the same routes. One page previews
 **every** open markdown buffer; a sidebar switches between them, and with nothing pinned it
 follows the editor's active buffer. Edits show up on the next poll (~500 ms) — no `:w`
-needed.
+needed, and only the block you changed is re-rendered, so a long document does not re-parse
+itself twice a second while you type. Links to other markdown files navigate the preview
+(read off disk when they are not open), and relative images load — a screenshot committed
+next to the document is served over the mount, bounded to images inside the workspace.
 
 ```
 :MarkdownPreview        mount (lazily) and open the preview in your browser
@@ -38,12 +41,17 @@ nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown 
 
 ## Try it
 
+From this repo's root:
+
 ```sh
-NXVIM_CONFIG=examples cargo run -p nxvim -- SOME_FILE.md   # from the nxvim repo
+NXVIM_CONFIG=examples nxvim examples/sample.md
 ```
 
-Then `:MarkdownPreview`, open more markdown files with `:e`, and switch between them from
-the sidebar. See [`examples/init.lua`](examples/init.lua).
+Then `:MarkdownPreview` (or `<leader>p`). [`examples/sample.md`](examples/sample.md) is a
+guided tour — live edit, the cursor line, code fences, mermaid, relative images, link
+navigation, the buffer sidebar — each section a *type-this / see-that* note. Run it from the
+repo root rather than from `examples/`: the cwd is the workspace root, and the mount only
+reads inside it.
 
 ## Documentation
 
@@ -57,10 +65,12 @@ The same source renders both on GitHub and in the editor:
 
 ## Development
 
-Pure-Lua [`nx.test`](https://github.com/davidrios/nxvim) specs drive the routing directly
-with a fake `req`/`respond` — no socket, no browser (`server_spec` covers markdown
-classification, `/buffers`, `/source`, and the `/` shell; `page_spec` pins the page's
-client-side render invariants):
+Pure-Lua [`nx.test`](https://github.com/davidrios/nxvim) specs. `server_spec` drives the
+routing directly with a fake `req`/`respond` — no socket, no browser — covering markdown
+classification, `/buffers`, `/source`, `/file` and its bounding, and the `/` shell.
+`page_spec` pins the page's client-side render invariants. `mount_spec` binds one real
+mount and fetches every route over HTTP, so the plumbing either side of the handler is
+covered too:
 
 ```sh
 nxvim --test-plugin .
