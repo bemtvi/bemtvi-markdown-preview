@@ -1,7 +1,7 @@
--- nxvim-markdown-preview — a live, browser-based markdown preview for nxvim, built
--- entirely on the native `nx.*` plugin API (ADR 0002): no core changes.
+-- bemtvi-markdown-preview — a live, browser-based markdown preview for bemtvi, built
+-- entirely on the native `btv.*` plugin API (ADR 0002): no core changes.
 --
--- The editor serves bytes over a single `nx.http.mount`; the browser renders. The page
+-- The editor serves bytes over a single `btv.http.mount`; the browser renders. The page
 -- polls the mount, so a live edit shows up on the next poll with no server push, and one
 -- page previews EVERY open markdown buffer — a sidebar to switch, plus a follow-the-
 -- editor mode. Because it is a mount (not a bound port), the identical plugin runs on the
@@ -11,9 +11,9 @@
 --   server.lua   which buffers are markdown + the on_request routing (pure, testable)
 --   page.lua     the self-contained preview page (marked + mermaid, client-side)
 --
--- Quick start (init.lua): require("nxvim-markdown-preview").setup() — then :MarkdownPreview.
+-- Quick start (init.lua): require("bemtvi-markdown-preview").setup() — then :MarkdownPreview.
 
-local server = require("nxvim-markdown-preview.server")
+local server = require("bemtvi-markdown-preview.server")
 
 local M = {}
 
@@ -26,7 +26,7 @@ local mount = nil
 local pending = nil
 
 local function notify(msg, level)
-  nx.notify("nxvim-markdown-preview: " .. msg, level)
+  btv.notify("bemtvi-markdown-preview: " .. msg, level)
 end
 
 -- A rejection handler for a chain whose failure is already reported elsewhere.
@@ -36,13 +36,13 @@ local function ignore() end
 -- returns the live handle, or the in-flight bind, or starts one.
 local function ensure_mount()
   if mount and mount:is_open() then
-    return nx.promise.resolve(mount)
+    return btv.promise.resolve(mount)
   end
   if pending then
     return pending
   end
-  pending = nx.http
-    .mount({ name = "nxvim-markdown-preview", on_request = server.handle })
+  pending = btv.http
+    .mount({ name = "bemtvi-markdown-preview", on_request = server.handle })
     :next(function(m)
       mount = m
       pending = nil
@@ -68,12 +68,12 @@ function M.open()
       if not m:is_open() then
         return notify("the preview was stopped before it finished starting")
       end
-      nx.ui.open(m:url())
+      btv.ui.open(m:url())
       notify("preview open at " .. m:url())
     end)
     :catch(function(err)
       local msg = type(err) == "table" and err.message or err
-      notify("could not mount the preview: " .. tostring(msg), nx.log.levels.ERROR)
+      notify("could not mount the preview: " .. tostring(msg), btv.log.levels.ERROR)
     end)
 end
 
@@ -121,15 +121,15 @@ function M.setup()
   end
   registered = true
 
-  nx.user_command.create("MarkdownPreview", function()
+  btv.user_command.create("MarkdownPreview", function()
     M.open()
   end, { desc = "Open a live markdown preview in the browser" })
 
-  nx.user_command.create("MarkdownPreviewStop", function()
+  btv.user_command.create("MarkdownPreviewStop", function()
     M.stop()
   end, { desc = "Stop the markdown preview mount" })
 
-  nx.user_command.create("MarkdownPreviewToggle", function()
+  btv.user_command.create("MarkdownPreviewToggle", function()
     if M.url() then
       M.stop()
     else

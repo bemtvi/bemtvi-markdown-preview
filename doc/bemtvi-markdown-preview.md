@@ -1,10 +1,10 @@
-<!-- DO NOT EDIT doc/nxvim-markdown-preview.txt BY HAND. It is generated from this file
+<!-- DO NOT EDIT doc/bemtvi-markdown-preview.txt BY HAND. It is generated from this file
 by panvimdoc — run `scripts/gen-vimdoc.sh` after editing. -->
 
-A live, in-browser markdown preview for nxvim — an optional first-party plugin built entirely on
-the native `nx.*` plugin API (ADR 0002): no core changes.
+A live, in-browser markdown preview for bemtvi — an optional first-party plugin built entirely on
+the native `btv.*` plugin API (ADR 0002): no core changes.
 
-The editor serves your open buffers over a single `nx.http.mount`; the browser renders them (marked
+The editor serves your open buffers over a single `btv.http.mount`; the browser renders them (marked
 for markdown, highlight.js for code-fence syntax highlighting across ~190 languages, mermaid for
 diagrams). Because it is a mount (a subroute on the editor's one origin) and not a bound port, the
 identical plugin runs on the web build too — a Service Worker satisfies the same routes. One page
@@ -17,10 +17,10 @@ page follows the editor's active buffer.
 :MarkdownPreviewToggle  Open if stopped, stop if open.
 ```
 
-<!-- Passed through verbatim so `:help nxvim-markdown-preview` lands on this page
+<!-- Passed through verbatim so `:help bemtvi-markdown-preview` lands on this page
      (panvimdoc derives per-section tags but no bare project tag). -->
 ```vimdoc
-                            *nxvim-markdown-preview* *markdown-preview-intro*
+                            *bemtvi-markdown-preview* *markdown-preview-intro*
 ```
 
 # Usage
@@ -76,24 +76,24 @@ options, read when the mount binds. The default is an ephemeral loopback port (`
 `'httpport'` = 0). Pin a stable, bookmarkable one:
 
 ```lua
-nx.o.httpport = 8080          -- 0 (default) picks a free port
--- nx.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
+btv.o.httpport = 8080          -- 0 (default) picks a free port
+-- btv.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
 ```
 
 # Setup
 
 With `:Plugins` the plugin is on the runtimepath and `setup()` runs automatically (from
-`plugin/nxvim-markdown-preview.lua`), so the commands exist out of the box. Calling it yourself is
+`plugin/bemtvi-markdown-preview.lua`), so the commands exist out of the box. Calling it yourself is
 harmless — it only registers the commands, it never binds a mount:
 
 ```lua
-require("nxvim-markdown-preview").setup()
+require("bemtvi-markdown-preview").setup()
 ```
 
 A leader map, if you like:
 
 ```lua
-nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
+btv.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
 ```
 
 # The mount
@@ -113,7 +113,7 @@ GET /asset?path= an image's raw bytes read from disk, for a relative ![](…) in
 ```
 
 `/file` and `/asset` are both bounded to the workspace (`getcwd()`): the requested path and the root
-are both canonicalized (`nx.fs.realpath`, so a `..` walk or a symlink that escapes is refused, and
+are both canonicalized (`btv.fs.realpath`, so a `..` walk or a symlink that escapes is refused, and
 `/var` vs `/private/var` can't fool the check), the read is of the canonicalized path, and an
 out-of-tree path is a 403. They differ only in what they will serve — `/file` markdown, `/asset` a
 closed list of image types (`.png`, `.apng`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.bmp`,
@@ -133,7 +133,7 @@ is built and not on every poll — but by the same token, replacing the image *f
 refresh it until something in that block changes, or you reload the page.
 
 `/source?buf=` is bounded the same way: the bufnr arrives off the wire, so it is re-checked against
-the open markdown buffers rather than read as given (`?buf=0`, which inside `nx.buf.*` would mean
+the open markdown buffers rather than read as given (`?buf=0`, which inside `btv.buf.*` would mean
 "whatever is focused", is a 404 like any other unknown handle).
 
 Every route reads — nothing here mutates the editor — so the mount answers `GET` and `HEAD` and
@@ -156,7 +156,7 @@ code-block renderer falls back to marked's own (HTML-escaping) renderer, and eve
 fence, whose source has to go back into the page as text for mermaid to read — that one insertion
 the page escapes itself.
 
-Security: `nx.http.mount` mounts share one origin, so the same-origin policy does not isolate one
+Security: `btv.http.mount` mounts share one origin, so the same-origin policy does not isolate one
 mount from another — a mount is a trust boundary between the editor and the network, not between
 plugins. The preview renders content you are actively editing (your own buffers); marked does not
 sanitize, so raw HTML in a buffer renders, as expected for a preview of your own documents.

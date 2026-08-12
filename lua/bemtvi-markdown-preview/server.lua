@@ -1,12 +1,12 @@
 -- The mount's request layer: which buffers count as markdown, and how a single
 -- `on_request(req, respond)` routes into the three endpoints the page talks to.
 --
--- Everything here is a PURE function of the editor state (`nx.buf.*`) plus `req` — the
+-- Everything here is a PURE function of the editor state (`btv.buf.*`) plus `req` — the
 -- lifecycle (binding the mount, opening the browser) lives in init.lua. That split is
 -- what lets `test/*_spec.lua` drive `handle` with a fake `req`/`respond` and never need
 -- a real socket: the mount is plumbing, the routing is the behaviour under test.
 
-local page = require("nxvim-markdown-preview.page")
+local page = require("bemtvi-markdown-preview.page")
 
 local M = {}
 
@@ -51,7 +51,7 @@ local function basename(name)
   return name:match("[^/]+$") or name
 end
 
--- A buffer's name made ABSOLUTE. `nx.buf.name` returns the name AS OPENED — often relative
+-- A buffer's name made ABSOLUTE. `btv.buf.name` returns the name AS OPENED — often relative
 -- (`:edit README.md` -> `"README.md"`), which the page must not use as a link base or it
 -- resolves `docs/x.md` against `/README.md`. `":p"` joins it onto the cwd; an unnamed
 -- buffer stays `""` (never the bare cwd `":p"` would hand back for an empty name).
@@ -59,7 +59,7 @@ local function abspath(name)
   if name == nil or name == "" then
     return ""
   end
-  return nx.fname.modify(name, ":p")
+  return btv.fname.modify(name, ":p")
 end
 
 -- Does this path *look* like markdown (by extension)? The classifier for a file the
@@ -93,16 +93,16 @@ end
 -- extension as the fallback for a listed buffer that has never been entered and so has no
 -- filetype yet.
 local function is_markdown(buf)
-  if not nx.buf.is_valid(buf) then
+  if not btv.buf.is_valid(buf) then
     return false
   end
-  if (nx.buf.get_option(buf, "buftype") or "") ~= "" then
+  if (btv.buf.get_option(buf, "buftype") or "") ~= "" then
     return false
   end
-  if nx.buf.get_option(buf, "filetype") == "markdown" then
+  if btv.buf.get_option(buf, "filetype") == "markdown" then
     return true
   end
-  return md_ext(nx.buf.name(buf))
+  return md_ext(btv.buf.name(buf))
 end
 
 -- The workspace root that bounds `/file`: the editor's cwd (a `--workspace` launch cds
@@ -113,7 +113,7 @@ local function root()
 end
 
 -- Is `canon` (an already-canonical path) inside `root_canon`? Plain prefix test, correct
--- only because BOTH sides came through `nx.fs.realpath` — symlinks and `..` resolved — so
+-- only because BOTH sides came through `btv.fs.realpath` — symlinks and `..` resolved — so
 -- `/var/folders/...` vs its `/private/var/...` real path cannot disagree. A root of `/`
 -- is its own case: appending the separator would ask for the prefix `"//"`, which no
 -- canonical path has, so an editor launched at the filesystem root would refuse every
@@ -134,29 +134,29 @@ end
 -- lists `list` in the sidebar, and marks the `cursor` line when it is showing `active`.
 function M.buffers()
   local list = {}
-  for _, id in ipairs(nx.buf.list()) do
+  for _, id in ipairs(btv.buf.list()) do
     if is_markdown(id) then
-      local name = abspath(nx.buf.name(id))
+      local name = abspath(btv.buf.name(id))
       list[#list + 1] = { id = id, name = name, label = basename(name) }
     end
   end
-  local cur = nx.buf.current()
+  local cur = btv.buf.current()
   local active = is_markdown(cur) and cur or nil
   -- The cursor belongs to the current window; report its line only when that current
   -- buffer is the markdown one on show, so the page never marks a line in the wrong doc.
-  local cursor = active and nx.cursor.get()[1] or nil
+  local cursor = active and btv.cursor.get()[1] or nil
   return { active = active, cursor = cursor, root = root(), list = list }
 end
 
 -- The raw markdown text of `buf`, or nil when it is not a live markdown buffer. The
 -- membership check matters: `/source?buf=` takes a number off the wire, so it is bounded
 -- to the buffers the page was told about rather than reading whatever bufnr was asked
--- for. `is_markdown` IS that bound — it starts with `nx.buf.is_valid`, which is exactly
+-- for. `is_markdown` IS that bound — it starts with `btv.buf.is_valid`, which is exactly
 -- "this handle is one of the open buffers", and `M.buffers()` filters on nothing else.
 -- (Going through `M.buffers()` would absolutize every open buffer's name to answer a
 -- question about one, on a route the page polls twice a second.)
 --
--- `0` and negatives are rejected up front: `nx.buf.*` reads `0` as "the current buffer",
+-- `0` and negatives are rejected up front: `btv.buf.*` reads `0` as "the current buffer",
 -- so a bare `?buf=0` off the wire would otherwise address whatever is focused.
 local function source_of(buf)
   if type(buf) ~= "number" or buf < 1 or buf % 1 ~= 0 then
@@ -165,7 +165,7 @@ local function source_of(buf)
   if not is_markdown(buf) then
     return nil
   end
-  return table.concat(nx.buf.lines(buf, 0, -1), "\n")
+  return table.concat(btv.buf.lines(buf, 0, -1), "\n")
 end
 
 local JSON =
@@ -182,10 +182,10 @@ local TEXT = { ["content-type"] = "text/plain; charset=utf-8", ["cache-control"]
 -- `read` is handed `canon` rather than `path` because `canon` is what the check proved;
 -- reading anything else re-opens the gap it closed.
 local function serve_bounded(path, respond, read)
-  nx.fs
+  btv.fs
     .realpath(root())
     :next(function(root_canon)
-      return nx.fs.realpath(path):next(function(canon)
+      return btv.fs.realpath(path):next(function(canon)
         if not contains(root_canon, canon) then
           respond({ status = 403, headers = TEXT, body = "outside the workspace\n" })
         else
@@ -207,7 +207,7 @@ local function serve_file(path, respond)
     return
   end
   serve_bounded(path, respond, function(canon)
-    return nx.fs.read_text(canon):next(function(text)
+    return btv.fs.read_text(canon):next(function(text)
       respond({ headers = TEXT, body = text })
     end)
   end)
@@ -230,7 +230,7 @@ local function serve_asset(path, respond)
   serve_bounded(path, respond, function(canon)
     -- `read`, not `read_text`: these are bytes, and decoding them as text would both
     -- corrupt them and reject (EILSEQ) on the first non-UTF-8 byte of any real png.
-    return nx.fs.read(canon):next(function(bytes)
+    return btv.fs.read(canon):next(function(bytes)
       respond({
         headers = {
           ["content-type"] = ctype,
@@ -286,7 +286,7 @@ function M.handle(req, respond)
   if path == "/" then
     respond({ headers = page.headers(), body = page.html() })
   elseif path == "/buffers" then
-    respond({ headers = JSON, body = nx.json.encode(M.buffers()) })
+    respond({ headers = JSON, body = btv.json.encode(M.buffers()) })
   elseif path == "/source" then
     local text = source_of(tonumber(req.query and req.query.buf))
     if text == nil then

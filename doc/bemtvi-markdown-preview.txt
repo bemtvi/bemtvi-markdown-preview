@@ -1,19 +1,19 @@
-*nxvim-markdown-preview.txt*        Live in-browser markdown preview for nxvim
+*bemtvi-markdown-preview.txt*        Live in-browser markdown preview for bemtvi
 
 ==============================================================================
-Table of Contents                   *nxvim-markdown-preview-table-of-contents*
+Table of Contents                   *bemtvi-markdown-preview-table-of-contents*
 
-1. Usage                                        |nxvim-markdown-preview-usage|
-2. Options                                    |nxvim-markdown-preview-options|
-3. Setup                                        |nxvim-markdown-preview-setup|
-4. The mount                                |nxvim-markdown-preview-the-mount|
-5. Notes                                        |nxvim-markdown-preview-notes|
+1. Usage                                        |bemtvi-markdown-preview-usage|
+2. Options                                    |bemtvi-markdown-preview-options|
+3. Setup                                        |bemtvi-markdown-preview-setup|
+4. The mount                                |bemtvi-markdown-preview-the-mount|
+5. Notes                                        |bemtvi-markdown-preview-notes|
 
-A live, in-browser markdown preview for nxvim — an optional first-party
-plugin built entirely on the native `nx.*` plugin API (ADR 0002): no core
+A live, in-browser markdown preview for bemtvi — an optional first-party
+plugin built entirely on the native `btv.*` plugin API (ADR 0002): no core
 changes.
 
-The editor serves your open buffers over a single `nx.http.mount`; the browser
+The editor serves your open buffers over a single `btv.http.mount`; the browser
 renders them (marked for markdown, highlight.js for code-fence syntax
 highlighting across ~190 languages, mermaid for diagrams). Because it is a
 mount (a subroute on the editor's one origin) and not a bound port, the
@@ -28,11 +28,11 @@ active buffer.
     :MarkdownPreviewToggle  Open if stopped, stop if open.
 <
 
-                            *nxvim-markdown-preview* *markdown-preview-intro*
+                            *bemtvi-markdown-preview* *markdown-preview-intro*
 
 
 ==============================================================================
-1. Usage                                        *nxvim-markdown-preview-usage*
+1. Usage                                        *bemtvi-markdown-preview-usage*
 
 - `:MarkdownPreview` — bind the mount if it is not up yet (nothing opens a port before this), then
     open the preview in your browser. The page follows the current buffer, so it works from whichever
@@ -87,7 +87,7 @@ a plugin dashboard are all scratch buffers that often carry
 
 
 ==============================================================================
-2. Options                                    *nxvim-markdown-preview-options*
+2. Options                                    *bemtvi-markdown-preview-options*
 
 WHERE the preview listens is your call, not the plugin's — the `'httphost'`
 and `'httpport'` options, read when the mount binds. The default is an
@@ -95,32 +95,32 @@ ephemeral loopback port (`127.0.0.1`, `'httpport'` = 0). Pin a stable,
 bookmarkable one:
 
 >lua
-    nx.o.httpport = 8080          -- 0 (default) picks a free port
-    -- nx.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
+    btv.o.httpport = 8080          -- 0 (default) picks a free port
+    -- btv.o.httphost = "0.0.0.0"  -- careful: exposes it to your LAN
 <
 
 
 ==============================================================================
-3. Setup                                        *nxvim-markdown-preview-setup*
+3. Setup                                        *bemtvi-markdown-preview-setup*
 
 With `:Plugins` the plugin is on the runtimepath and `setup()` runs
-automatically (from `plugin/nxvim-markdown-preview.lua`), so the commands exist
+automatically (from `plugin/bemtvi-markdown-preview.lua`), so the commands exist
 out of the box. Calling it yourself is harmless — it only registers the
 commands, it never binds a mount:
 
 >lua
-    require("nxvim-markdown-preview").setup()
+    require("bemtvi-markdown-preview").setup()
 <
 
 A leader map, if you like:
 
 >lua
-    nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
+    btv.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
 <
 
 
 ==============================================================================
-4. The mount                                *nxvim-markdown-preview-the-mount*
+4. The mount                                *bemtvi-markdown-preview-the-mount*
 
 The plugin is two small modules over the mount — `server.lua` (which buffers
 are markdown, and the `on_request` routing, pure over editor state) and
@@ -138,7 +138,7 @@ polls the right place whether or not the address ends in a slash:
 <
 
 `/file` and `/asset` are both bounded to the workspace (`getcwd()`): the
-requested path and the root are both canonicalized (`nx.fs.realpath`, so a `..`
+requested path and the root are both canonicalized (`btv.fs.realpath`, so a `..`
 walk or a symlink that escapes is refused, and `/var` vs `/private/var` can't
 fool the check), the read is of the canonicalized path, and an out-of-tree path
 is a 403. They differ only in what they will serve — `/file` markdown,
@@ -164,7 +164,7 @@ in that block changes, or you reload the page.
 
 `/source?buf=` is bounded the same way: the bufnr arrives off the wire, so it
 is re-checked against the open markdown buffers rather than read as given
-(`?buf=0`, which inside `nx.buf.*` would mean "whatever is focused", is a 404
+(`?buf=0`, which inside `btv.buf.*` would mean "whatever is focused", is a 404
 like any other unknown handle).
 
 Every route reads — nothing here mutates the editor — so the mount answers
@@ -172,7 +172,7 @@ Every route reads — nothing here mutates the editor — so the mount answers
 
 
 ==============================================================================
-5. Notes                                        *nxvim-markdown-preview-notes*
+5. Notes                                        *bemtvi-markdown-preview-notes*
 
 marked, highlight.js, and mermaid load from the jsDelivr CDN, so the preview
 page needs internet for those libraries. It renders your local buffers but
@@ -193,7 +193,7 @@ is written through `textContent`. The single exception is a `mermaid` fence,
 whose source has to go back into the page as text for mermaid to read — that
 one insertion the page escapes itself.
 
-Security: `nx.http.mount` mounts share one origin, so the same-origin policy
+Security: `btv.http.mount` mounts share one origin, so the same-origin policy
 does not isolate one mount from another — a mount is a trust boundary between
 the editor and the network, not between plugins. The preview renders content
 you are actively editing (your own buffers); marked does not sanitize, so raw

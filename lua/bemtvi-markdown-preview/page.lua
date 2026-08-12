@@ -45,7 +45,7 @@ local M = {}
 -- The mount renders content the user is actively editing (their own buffers), so this is
 -- a modest CSP, not a sandbox: it confines the page to `'self'` plus the jsDelivr origin
 -- the two libraries load from. marked does not sanitize, so raw HTML in a buffer renders
--- — expected for a preview of your own documents. NOTE the security caveat of nx.http
+-- — expected for a preview of your own documents. NOTE the security caveat of btv.http
 -- mounts: one shared origin, no cross-mount isolation (see httpmount.lua).
 --
 -- `img-src` is the one directive deliberately wider than the rest. A document's images come
@@ -209,7 +209,7 @@ const store = {
 // ----- cursor-follow toggle (auto-scroll) ----------------------------------
 // When on, the preview scrolls to keep the editor's cursor line in view. A user choice,
 // remembered across reloads; default on. Toggling on re-scrolls to the current cursor.
-let autoScroll = store.get("nxmp.autoscroll") !== "0";
+let autoScroll = store.get("btvmp.autoscroll") !== "0";
 let lastCursorLine = null;   // the last line applyCursor scrolled for; null re-arms a scroll
 function renderCursorFollow() {
   cursorFollowEl.textContent = autoScroll ? "⭱ following cursor" : "⭱ follow cursor";
@@ -217,7 +217,7 @@ function renderCursorFollow() {
 }
 cursorFollowEl.onclick = () => {
   autoScroll = !autoScroll;
-  store.set("nxmp.autoscroll", autoScroll ? "1" : "0");
+  store.set("btvmp.autoscroll", autoScroll ? "1" : "0");
   lastCursorLine = null;   // so enabling scrolls to the cursor on the next poll
   renderCursorFollow();
 };
@@ -228,7 +228,7 @@ renderCursorFollow();
 function parseSel() {
   const raw = location.hash.slice(1);
   // A bufnr is a positive integer; anything else in the hash is not a buffer we can ask
-  // for (Number("") is 0, which nx.buf.* would read as "the current buffer").
+  // for (Number("") is 0, which btv.buf.* would read as "the current buffer").
   if (raw.startsWith("b:")) { const id = Number(raw.slice(2)); return Number.isInteger(id) && id > 0 ? { buf: id } : null; }
   if (raw.startsWith("f:")) return { file: decode(raw.slice(2)) };
   return null;   // follow the editor's active buffer

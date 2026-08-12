@@ -1,10 +1,10 @@
-# nxvim-markdown-preview
+# bemtvi-markdown-preview
 
-A live, in-browser **markdown preview** for [nxvim](https://github.com/davidrios/nxvim) —
-an optional first-party plugin built entirely on the native `nx.*` plugin API
-([ADR 0002](https://github.com/davidrios/nxvim)): no core changes.
+A live, in-browser **markdown preview** for [bemtvi](https://github.com/davidrios/bemtvi) —
+an optional first-party plugin built entirely on the native `btv.*` plugin API
+([ADR 0002](https://github.com/davidrios/bemtvi)): no core changes.
 
-The editor serves your buffers over a single [`nx.http.mount`](https://github.com/davidrios/nxvim);
+The editor serves your buffers over a single [`btv.http.mount`](https://github.com/davidrios/bemtvi);
 the **browser** renders them ([marked](https://marked.js.org) for markdown, highlight.js
 for fenced-code syntax, [mermaid](https://mermaid.js.org) for diagrams). Because it is a
 *mount* (a subroute on the editor's one origin) and not a bound port, the identical plugin
@@ -28,15 +28,15 @@ Put the plugin on the runtimepath and call `setup()` (it registers the commands;
 **not** bind a mount):
 
 ```lua
-require("nxvim-markdown-preview").setup()
+require("bemtvi-markdown-preview").setup()
 ```
 
 With `:Plugins` the plugin is already on the runtimepath, so `setup()` runs from
-`plugin/nxvim-markdown-preview.lua` automatically — the commands exist out of the box. A
+`plugin/bemtvi-markdown-preview.lua` automatically — the commands exist out of the box. A
 leader map, if you like:
 
 ```lua
-nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
+btv.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
 ```
 
 ## Try it
@@ -44,7 +44,7 @@ nx.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreview<cr>", { desc = "Markdown 
 From this repo's root:
 
 ```sh
-NXVIM_CONFIG=examples nxvim examples/sample.md
+BEMTVI_CONFIG=examples bemtvi examples/sample.md
 ```
 
 Then `:MarkdownPreview` (or `<leader>p`). [`examples/sample.md`](examples/sample.md) is a
@@ -60,12 +60,12 @@ navigation, the `'httphost'` / `'httpport'` options, `setup()`, the mount's endp
 the `/file` disk-read bounding, and the network/security notes — live in the help file.
 The same source renders both on GitHub and in the editor:
 
-- In editor: `:help nxvim-markdown-preview`
-- On GitHub: [doc/nxvim-markdown-preview.md](./doc/nxvim-markdown-preview.md) (the help source)
+- In editor: `:help bemtvi-markdown-preview`
+- On GitHub: [doc/bemtvi-markdown-preview.md](./doc/bemtvi-markdown-preview.md) (the help source)
 
 ## Development
 
-Pure-Lua [`nx.test`](https://github.com/davidrios/nxvim) specs. `server_spec` drives the
+Pure-Lua [`btv.test`](https://github.com/davidrios/bemtvi) specs. `server_spec` drives the
 routing directly with a fake `req`/`respond` — no socket, no browser — covering markdown
 classification, `/buffers`, `/source`, `/file` and its bounding, and the `/` shell.
 `page_spec` pins the page's client-side render invariants. `mount_spec` binds one real
@@ -73,11 +73,11 @@ mount and fetches every route over HTTP, so the plumbing either side of the hand
 covered too:
 
 ```sh
-nxvim --test-plugin .
+bemtvi --test-plugin .
 ```
 
-The vimdoc `doc/nxvim-markdown-preview.txt` is **generated** from
-`doc/nxvim-markdown-preview.md` via [panvimdoc](https://github.com/kdheepak/panvimdoc):
+The vimdoc `doc/bemtvi-markdown-preview.txt` is **generated** from
+`doc/bemtvi-markdown-preview.md` via [panvimdoc](https://github.com/kdheepak/panvimdoc):
 edit the `.md`, then run `bash scripts/gen-vimdoc.sh` (needs `pandoc` + `git`). Never edit
 the `.txt` by hand.
 

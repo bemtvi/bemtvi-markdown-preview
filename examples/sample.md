@@ -1,8 +1,8 @@
-# nxvim-markdown-preview — sample
+# bemtvi-markdown-preview — sample
 
 Open this file with the example config and run `:MarkdownPreview`:
 
-    NXVIM_CONFIG=examples nxvim examples/sample.md
+    BEMTVI_CONFIG=examples bemtvi examples/sample.md
 
 Then work down the list — each section is something to *type here* and *see there*, in the
 browser, on the next poll (~500 ms). No `:write` needed.
@@ -37,7 +37,7 @@ end
 ```
 
 ```sh
-nxvim --test-plugin .
+bemtvi --test-plugin .
 ```
 
 ## 4. Mermaid diagrams
@@ -47,7 +47,7 @@ falls back to text — the rest of the page keeps rendering, and the status stay
 
 ```mermaid
 graph LR
-  editor[nxvim] -->|/source| page[preview page]
+  editor[bemtvi] -->|/source| page[preview page]
   page -->|poll| editor
 ```
 
