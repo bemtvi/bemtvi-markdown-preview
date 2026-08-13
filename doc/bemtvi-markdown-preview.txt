@@ -1,13 +1,13 @@
-*bemtvi-markdown-preview.txt*        Live in-browser markdown preview for bemtvi
+*bemtvi-markdown-preview.txt*      Live in-browser markdown preview for bemtvi
 
 ==============================================================================
-Table of Contents                   *bemtvi-markdown-preview-table-of-contents*
+Table of Contents                  *bemtvi-markdown-preview-table-of-contents*
 
-1. Usage                                        |bemtvi-markdown-preview-usage|
-2. Options                                    |bemtvi-markdown-preview-options|
-3. Setup                                        |bemtvi-markdown-preview-setup|
-4. The mount                                |bemtvi-markdown-preview-the-mount|
-5. Notes                                        |bemtvi-markdown-preview-notes|
+1. Usage                                       |bemtvi-markdown-preview-usage|
+2. Options                                   |bemtvi-markdown-preview-options|
+3. Setup                                       |bemtvi-markdown-preview-setup|
+4. The mount                               |bemtvi-markdown-preview-the-mount|
+5. Notes                                       |bemtvi-markdown-preview-notes|
 
 A live, in-browser markdown preview for bemtvi — an optional first-party
 plugin built entirely on the native `btv.*` plugin API (ADR 0002): no core
@@ -32,7 +32,7 @@ active buffer.
 
 
 ==============================================================================
-1. Usage                                        *bemtvi-markdown-preview-usage*
+1. Usage                                       *bemtvi-markdown-preview-usage*
 
 - `:MarkdownPreview` — bind the mount if it is not up yet (nothing opens a port before this), then
     open the preview in your browser. The page follows the current buffer, so it works from whichever
@@ -87,7 +87,7 @@ a plugin dashboard are all scratch buffers that often carry
 
 
 ==============================================================================
-2. Options                                    *bemtvi-markdown-preview-options*
+2. Options                                   *bemtvi-markdown-preview-options*
 
 WHERE the preview listens is your call, not the plugin's — the `'httphost'`
 and `'httpport'` options, read when the mount binds. The default is an
@@ -101,11 +101,11 @@ bookmarkable one:
 
 
 ==============================================================================
-3. Setup                                        *bemtvi-markdown-preview-setup*
+3. Setup                                       *bemtvi-markdown-preview-setup*
 
 With `:Plugins` the plugin is on the runtimepath and `setup()` runs
-automatically (from `plugin/bemtvi-markdown-preview.lua`), so the commands exist
-out of the box. Calling it yourself is harmless — it only registers the
+automatically (from `plugin/bemtvi-markdown-preview.lua`), so the commands
+exist out of the box. Calling it yourself is harmless — it only registers the
 commands, it never binds a mount:
 
 >lua
@@ -120,7 +120,7 @@ A leader map, if you like:
 
 
 ==============================================================================
-4. The mount                                *bemtvi-markdown-preview-the-mount*
+4. The mount                               *bemtvi-markdown-preview-the-mount*
 
 The plugin is two small modules over the mount — `server.lua` (which buffers
 are markdown, and the `on_request` routing, pure over editor state) and
@@ -138,15 +138,15 @@ polls the right place whether or not the address ends in a slash:
 <
 
 `/file` and `/asset` are both bounded to the workspace (`getcwd()`): the
-requested path and the root are both canonicalized (`btv.fs.realpath`, so a `..`
-walk or a symlink that escapes is refused, and `/var` vs `/private/var` can't
-fool the check), the read is of the canonicalized path, and an out-of-tree path
-is a 403. They differ only in what they will serve — `/file` markdown,
-`/asset` a closed list of image types (`.png`, `.apng`, `.jpg`, `.jpeg`,
-`.gif`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg`) — and anything else is
-refused before any disk read. So the preview can show your repo's documents
-and images, and nothing else on the disk: `/asset` is an image route, not a
-static file server.
+requested path and the root are both canonicalized (`btv.fs.realpath`, so a
+`..` walk or a symlink that escapes is refused, and `/var` vs `/private/var`
+can't fool the check), the read is of the canonicalized path, and an
+out-of-tree path is a 403. They differ only in what they will serve — `/file`
+markdown, `/asset` a closed list of image types (`.png`, `.apng`, `.jpg`,
+`.jpeg`, `.gif`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg`) — and anything
+else is refused before any disk read. So the preview can show your repo's
+documents and images, and nothing else on the disk: `/asset` is an image route,
+not a static file server.
 
 `/asset` serves raw bytes with the `content-type` the extension implies, plus
 `nosniff` so the browser does not pick a different one, and
@@ -172,7 +172,7 @@ Every route reads — nothing here mutates the editor — so the mount answers
 
 
 ==============================================================================
-5. Notes                                        *bemtvi-markdown-preview-notes*
+5. Notes                                       *bemtvi-markdown-preview-notes*
 
 marked, highlight.js, and mermaid load from the jsDelivr CDN, so the preview
 page needs internet for those libraries. It renders your local buffers but
