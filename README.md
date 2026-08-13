@@ -1,10 +1,10 @@
 # bemtvi-markdown-preview
 
-A live, in-browser **markdown preview** for [bemtvi](https://github.com/davidrios/bemtvi) —
+A live, in-browser **markdown preview** for [bemtvi](https://github.com/bemtvi/bemtvi) —
 an optional first-party plugin built entirely on the native `btv.*` plugin API
-([ADR 0002](https://github.com/davidrios/bemtvi)): no core changes.
+([ADR 0002](https://github.com/bemtvi/bemtvi)): no core changes.
 
-The editor serves your buffers over a single [`btv.http.mount`](https://github.com/davidrios/bemtvi);
+The editor serves your buffers over a single [`btv.http.mount`](https://github.com/bemtvi/bemtvi);
 the **browser** renders them ([marked](https://marked.js.org) for markdown, highlight.js
 for fenced-code syntax, [mermaid](https://mermaid.js.org) for diagrams). Because it is a
 *mount* (a subroute on the editor's one origin) and not a bound port, the identical plugin
@@ -65,7 +65,7 @@ The same source renders both on GitHub and in the editor:
 
 ## Development
 
-Pure-Lua [`btv.test`](https://github.com/davidrios/bemtvi) specs. `server_spec` drives the
+Pure-Lua [`btv.test`](https://github.com/bemtvi/bemtvi) specs. `server_spec` drives the
 routing directly with a fake `req`/`respond` — no socket, no browser — covering markdown
 classification, `/buffers`, `/source`, `/file` and its bounding, and the `/` shell.
 `page_spec` pins the page's client-side render invariants. `mount_spec` binds one real
