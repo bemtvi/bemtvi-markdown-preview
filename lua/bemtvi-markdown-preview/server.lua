@@ -109,7 +109,7 @@ end
 -- here at boot; a daemon session cds on the remote). `/file` serves markdown UNDER this
 -- and nothing else, so a link cannot walk the mount out to arbitrary disk.
 local function root()
-  return vim.fn.getcwd()
+  return btv.cwd()
 end
 
 -- Is `canon` (an already-canonical path) inside `root_canon`? Plain prefix test, correct

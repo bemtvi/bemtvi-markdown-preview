@@ -22,5 +22,5 @@ require("bemtvi-markdown-preview").setup()
 --   btv.o.httpport = 8080
 
 -- A leader map, for convenience.
-vim.g.mapleader = "\\"
+btv.g.mapleader = "\\"
 btv.keymap.set("n", "<leader>p", "<cmd>MarkdownPreview<cr>", { desc = "Markdown preview" })
