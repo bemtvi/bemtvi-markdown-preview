@@ -62,7 +62,9 @@ btv.test.describe("bemtvi-markdown-preview over a real mount", function()
       .to_be(403)
 
     -- Every route reads, so a write method is refused rather than served as a GET.
-    btv.test.expect(btv.await(btv.http.fetch(url .. "buffers", { method = "POST" })).status).to_be(405)
+    btv.test
+      .expect(btv.await(btv.http.fetch(url .. "buffers", { method = "POST" })).status)
+      .to_be(405)
     -- And a bufnr the page was never told about is not addressable (0 = "the current
     -- buffer" inside btv.buf.*, so it is the one that must not slip through).
     btv.test.expect(btv.await(btv.http.fetch(url .. "source?buf=0")).status).to_be(404)
