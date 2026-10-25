@@ -67,11 +67,15 @@ btv.test.describe("bemtvi-markdown-preview.page", function()
 
   btv.test.it("re-renders incrementally, reusing the DOM of unchanged blocks", function()
     local html = page.html()
-    btv.test.expect(html).to_contain("function reconcile(md)")
-    -- Blocks are matched by their raw source and their elements reused …
+    btv.test.expect(html).to_contain("async function reconcile(md, reset)")
+    -- Blocks are matched by their raw source and their ids reused, so only fresh blocks
+    -- are sent to the frame …
     btv.test.expect(html).to_contain("reusable.get(b.raw)")
-    -- … and only the freshly-built ones get handed to mermaid.
-    btv.test.expect(html).to_contain("runMermaid(reconcile(md))")
+    btv.test
+      .expect(html)
+      .to_contain('post({ t: "render", order: next.map((n) => n.id), add, reset })')
+    -- … and only the freshly-built ones get handed to mermaid there.
+    btv.test.expect(html).to_contain("runMermaid(fresh)")
   end)
 
   btv.test.it("contains a mermaid failure instead of reporting the editor gone", function()
@@ -92,8 +96,10 @@ btv.test.describe("bemtvi-markdown-preview.page", function()
     local html = page.html()
     btv.test.expect(html).to_contain("MD_RE")
     btv.test.expect(html).to_contain('"f:" + encodeURIComponent')
-    -- External links open in a new tab rather than navigating the preview.
-    btv.test.expect(html).to_contain('a.target = "_blank"')
+    -- External links open in a new tab rather than navigating the preview — and only
+    -- http(s)/mailto ones: the href comes out of the document.
+    btv.test.expect(html).to_contain('window.open(href, "_blank", "noopener")')
+    btv.test.expect(html).to_contain("/^(https?|mailto):/i.test(href)")
   end)
 
   btv.test.it("scrolls to the top when the document switches, not on a live edit", function()
@@ -134,5 +140,31 @@ btv.test.describe("bemtvi-markdown-preview.page", function()
     -- (a README's badges and hosted screenshots would otherwise all render broken).
     btv.test.expect(h["content-security-policy"]).to_contain("img-src 'self' data: https:")
     btv.test.expect(h["content-security-policy"]).to_contain("default-src 'self'")
+  end)
+
+  -- A rendered document is untrusted (marked does not sanitize; a README from a repo under
+  -- review can carry any HTML). It must land in an opaque-origin frame that runs only the
+  -- page's own nonced agent — never in the shell, which can reach the mount.
+  btv.test.it("renders documents into a sandboxed, script-locked frame", function()
+    local html = page.html()
+    local attr = html:match('<iframe id="doc" sandbox="([^"]*)"')
+    btv.test.expect(attr).to_be("allow-scripts")
+    btv.test.expect(attr:find("allow-same-origin", 1, true)).to_be_nil()
+    btv.test.expect(html).to_contain("frameEl.srcdoc = FRAME_HTML")
+    -- The frame's own CSP: only the per-load nonce (and mermaid's pinned path) may run,
+    -- and no network beyond images.
+    btv.test.expect(html).to_contain("\"default-src 'none'\"")
+    btv.test.expect(html).to_contain("`script-src 'nonce-${NONCE}' ${MERMAID}`")
+    btv.test.expect(html).to_contain("crypto.getRandomValues")
+    btv.test.expect(html).to_contain('<script nonce="${NONCE}">')
+    -- Rendered HTML is parsed only into an inert template and serialized back out; the
+    -- shell never inserts it into its own DOM.
+    btv.test.expect(html).to_contain('document.createElement("template")')
+    btv.test.expect(html).to_contain("return tpl.innerHTML;")
+    btv.test.expect(html:find("mainEl.innerHTML", 1, true)).to_be_nil()
+    -- Images are inlined by the shell, since the frame cannot reach the mount.
+    btv.test.expect(html).to_contain("fr.readAsDataURL(blob)")
+    -- The only message the shell takes from the frame is from THAT frame.
+    btv.test.expect(html).to_contain("e.source !== frameEl.contentWindow")
   end)
 end)

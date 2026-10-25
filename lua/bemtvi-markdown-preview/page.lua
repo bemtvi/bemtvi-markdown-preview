@@ -5,6 +5,24 @@
 -- as ES modules from jsDelivr, so the page needs the network for those libraries (it
 -- renders your local buffers, but pulls the renderer from a CDN).
 --
+-- Containment. marked does not sanitize, so a document's raw HTML renders — and a README
+-- from a repo under review is not the user's own content. So the page is TWO documents:
+--
+--   * the SHELL (this page, served with the mount's `same_origin = true`): the sidebar,
+--     the poll, the marked/highlight.js parse. It is entirely this plugin's own code, and
+--     it is the only part that can reach the mount (`fetch` back to `/buffers` & co.).
+--   * the DOC FRAME: an `<iframe sandbox="allow-scripts" srcdoc>` WITHOUT
+--     `allow-same-origin`, holding the rendered markdown. It runs in an opaque origin, so
+--     nothing in a document can read the shell, the mount, the editor page (web build) or
+--     its storage. Its own CSP admits only the shell's per-load-nonced agent script (and
+--     mermaid from its pinned CDN path): a document's `<script>` or `onerror=` never runs,
+--     and `default-src 'none'` leaves it no network but `data:`/`https:` images.
+--
+-- The shell parses each block into an INERT `<template>` (no script runs, no image loads
+-- there), rewrites its images to `data:` URLs, and posts the serialized HTML to the frame's
+-- agent, which places it. Rendered HTML never enters the shell's live DOM. The frame talks
+-- back with one message, a clicked link's `href`, which the shell treats as untrusted.
+--
 -- Escaping is the library's job wherever there is a library to do it: highlight.js returns
 -- escaped markup, the code-block renderer returns `false` to fall back to marked's default
 -- (which HTML-escapes), and every dynamic value the page inserts (buffer labels, error
@@ -33,20 +51,23 @@
 -- preview to that file (`#f:<abs path>`) instead of the browser leaving the page — even
 -- when the target is not an open buffer, in which case `/file` reads it straight from
 -- disk. If the linked file *is* open, the page renders the live buffer instead. External
--- links open in a new tab; in-page `#anchor` links are left alone.
+-- `http(s):`/`mailto:` links open in a new tab (any other scheme — `javascript:` — is
+-- dropped); in-page `#anchor` links are left alone.
 --
--- Images: a relative `![](img/x.png)` is rewritten to the mount's `/asset` route as the
--- block renders, so an image committed beside the document loads. Same reason links go
--- through `/file` — the browser has no filesystem, so the bytes have to come from the
--- editor. An `https:` or `data:` src is left alone.
+-- Images: a relative `![](img/x.png)` is fetched by the shell from the mount's `/asset`
+-- route and inlined as a `data:` URL as the block renders, so an image committed beside
+-- the document loads. Same reason links go through `/file` — the browser has no
+-- filesystem, so the bytes have to come from the editor. Inlined rather than pointed at
+-- the mount because the sandboxed frame cannot load from the mount itself: natively its
+-- requests carry `Origin: null`, and on the web build they bypass the Service Worker. An
+-- `https:` or `data:` src is left alone.
 
 local M = {}
 
--- The mount renders content the user is actively editing (their own buffers), so this is
--- a modest CSP, not a sandbox: it confines the page to `'self'` plus the jsDelivr origin
--- the two libraries load from. marked does not sanitize, so raw HTML in a buffer renders
--- — expected for a preview of your own documents. NOTE the security caveat of btv.http
--- mounts: one shared origin, no cross-mount isolation (see httpmount.lua).
+-- The SHELL's CSP. The shell is this plugin's own code (rendered documents live in the
+-- sandboxed doc frame, see the top of this file), so this is a modest CSP: it confines the
+-- page to `'self'` plus the jsDelivr origin the libraries load from. The doc frame inherits
+-- it and adds its own, stricter one (`FRAME_CSP` in the page).
 --
 -- `img-src` is the one directive deliberately wider than the rest. A document's images come
 -- from three places: `'self'` covers the mount's own `/asset` route (a relative image read
@@ -83,9 +104,6 @@ local HTML = [==[
 <!-- An empty data: icon, so the browser does not go asking the mount for /favicon.ico —
      which is not a route, so every tab would log a console 404 on load. -->
 <link rel="icon" href="data:,">
-<!-- highlight.js token themes, one per colour scheme; each is a couple of KB. -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -118,13 +136,171 @@ local HTML = [==[
   #follow { margin-top: .8rem; }
   #follow:hover, #cursorfollow:hover { opacity: 1; }
   #follow.on, #cursorfollow.on { color: #3fb950; opacity: .9; }
-  #main { flex: 1 1 auto; min-width: 0; padding: 2rem 2.2rem; max-width: 52rem; }
+  /* The rendered document lives in the sandboxed frame, which scrolls on its own. */
+  #main { flex: 1 1 auto; min-width: 0; height: 100vh; position: sticky; top: 0; }
+  #doc { display: block; width: 100%; height: 100%; border: 0; }
+  #status { position: fixed; top: .6rem; right: .8rem; font-size: .72rem; opacity: .5; font-family: ui-monospace, monospace; }
+  #empty { opacity: .5; font-style: italic; }
+</style>
+</head>
+<body>
+<div id="status">connecting…</div>
+<div id="layout">
+  <nav id="side">
+    <h2>markdown buffers</h2>
+    <div id="buflist"></div>
+    <button id="follow" title="Render whichever buffer is active in the editor"></button>
+    <button id="cursorfollow" title="Scroll to keep the editor's cursor line in view"></button>
+  </nav>
+  <!-- The rendered document. sandbox WITHOUT allow-same-origin: an opaque origin, so a
+       document's own markup can never reach this page, the mount, or the editor. -->
+  <article id="main"><iframe id="doc" sandbox="allow-scripts" title="rendered document"></iframe></article>
+</div>
+<script type="module">
+import { marked } from "https://cdn.jsdelivr.net/npm/marked/+esm";
+import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";   // ~190 languages
+
+// The page's ONE hand-rolled escape: a mermaid fence goes back into the DOM as source
+// text for mermaid to read, so it cannot be interpolated raw — a diagram containing
+// markup would be parsed as HTML, and a literal "</pre>" would break out of the block.
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+// Auto-detection runs the text through every grammar highlight.js has, so it is by far
+// the most expensive thing a render does. Past this size an unlabelled fence is left
+// plain rather than spending seconds on it inside a poll.
+const HL_MAX = 100000;
+
+// mermaid fences become <pre class="mermaid">, drawn by mermaid INSIDE the doc frame;
+// every other code block is syntax-highlighted by highlight.js — by the fence's language
+// when it names a known one, else auto-detected. hljs.highlight()/highlightAuto() return
+// HTML-escaped, span-wrapped markup, so escaping is the library's job there. Returning
+// false anywhere here falls back to marked's own code renderer, which escapes too.
+marked.use({ renderer: { code({ text, lang }) {
+  if (lang === "mermaid") return `<pre class="mermaid">${esc(text)}</pre>`;
+  const language = lang && hljs.getLanguage(lang) ? lang : null;
+  if (!language && text.length > HL_MAX) return false;
+  try {
+    const out = language ? hljs.highlight(text, { language }) : hljs.highlightAuto(text);
+    return `<pre><code class="hljs${language ? " language-" + language : ""}">${out.value}</code></pre>`;
+  } catch { return false; }
+}}});
+marked.use({ gfm: true, breaks: false });
+
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("buflist");
+const frameEl = document.getElementById("doc");
+const followEl = document.getElementById("follow");
+const cursorFollowEl = document.getElementById("cursorfollow");
+
+const MD_RE = /\.(md|markdown|mdown|mkd|mkdn|mdx)$/i;
+const POLL_MS = 500;
+
+// The mount's base path, for the relative fetches below. mount:url() is trailing-slashed,
+// but a URL typed or bookmarked without the slash serves the same page — and then a bare
+// "buffers" would resolve one level UP, out of the mount, and every poll would 404. So
+// derive the base rather than trusting the address bar to end in "/".
+const BASE = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
+
+// ----- the sandboxed doc frame ---------------------------------------------
+// A fresh nonce per page load: the frame's CSP runs ONLY the script carrying it (the agent
+// below) plus mermaid from its pinned path, so markup in a document — a <script>, an
+// onerror= — never executes, and default-src 'none' gives it no network at all.
+const NONCE = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+const MERMAID = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/";
+const FRAME_CSP = [
+  "default-src 'none'",
+  `script-src 'nonce-${NONCE}' ${MERMAID}`,
+  "style-src 'unsafe-inline' https://cdn.jsdelivr.net",
+  "img-src data: https:",
+  "font-src data: https://cdn.jsdelivr.net",
+].join("; ");
+
+// The frame's agent: places the blocks the shell posts, marks the cursor block, draws
+// mermaid diagrams, and reports link clicks back. It only ever ACCEPTS messages from the
+// shell (its parent); the one thing it sends is { t: "link", href }.
+const AGENT = `
+const main = document.getElementById("main");
+const els = new Map();          // block id -> element
+let cursor = null;
+let mermaidP = null;
+const loadMermaid = () => mermaidP || (mermaidP = import("${MERMAID}mermaid.esm.min.mjs")
+  .then((m) => { m.default.initialize({ startOnLoad: false, securityLevel: "strict" }); return m.default; })
+  .catch(() => null));
+// mermaid THROWS on a diagram it cannot parse, which is the normal state of a fence you are
+// halfway through typing; contain that so a bad diagram stays as its source text.
+async function runMermaid(els) {
+  const nodes = [];
+  for (const el of els) for (const n of el.querySelectorAll("pre.mermaid")) nodes.push(n);
+  if (nodes.length === 0) return;
+  const mermaid = await loadMermaid();
+  if (!mermaid) return;
+  try { await mermaid.run({ nodes, suppressErrors: true }); } catch {}
+}
+addEventListener("message", (e) => {
+  if (e.source !== parent || !e.data) return;
+  const m = e.data;
+  if (m.t === "render") {
+    if (m.reset) { els.clear(); cursor = null; }
+    const fresh = [];
+    for (const [id, html] of m.add) {
+      const el = document.createElement("div");
+      el.className = "blk";
+      el.innerHTML = html;
+      els.set(id, el);
+      fresh.push(el);
+    }
+    const keep = new Set(m.order);
+    for (const id of [...els.keys()]) if (!keep.has(id)) els.delete(id);
+    main.replaceChildren(...m.order.map((id) => els.get(id)).filter(Boolean));
+    if (cursor && !cursor.isConnected) cursor = null;
+    if (m.reset) scrollTo(0, 0);
+    runMermaid(fresh);
+  } else if (m.t === "empty") {
+    els.clear(); cursor = null;
+    const p = document.createElement("p");
+    p.id = "empty";
+    p.textContent = String(m.text);
+    main.replaceChildren(p);
+  } else if (m.t === "cursor") {
+    const hit = m.id == null ? null : (els.get(m.id) || null);
+    if (hit !== cursor) {
+      if (cursor) cursor.classList.remove("cursor-here");
+      if (hit) hit.classList.add("cursor-here");
+      cursor = hit;
+    }
+    if (m.scroll && hit) hit.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+});
+// Every link click goes to the shell, which decides; only an in-page #anchor stays here.
+function onLink(e) {
+  const a = e.target && e.target.closest ? e.target.closest("a") : null;
+  if (!a) return;
+  const href = a.getAttribute("href") || "";
+  if (!href || href.startsWith("#")) return;
+  e.preventDefault();
+  parent.postMessage({ t: "link", href }, "*");
+}
+addEventListener("click", onLink);
+addEventListener("auxclick", onLink);
+parent.postMessage({ t: "ready" }, "*");
+`;
+
+const FRAME_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">
+<!-- highlight.js token themes, one per colour scheme; each is a couple of KB. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  #main { padding: 2rem 2.2rem; max-width: 52rem; }
   /* Each top-level block is wrapped so it can take the cursor-line highlight and be
      replaced on its own when its source changes; the negative margin keeps its text
      aligned with the rest. */
   .blk { padding: 0 .6rem; margin: 0 -.6rem; border-radius: 6px; transition: background .1s; }
   .blk.cursor-here { background: color-mix(in srgb, #4493f8 14%, transparent); box-shadow: inset 3px 0 0 #4493f8; }
-  #status { position: fixed; top: .6rem; right: .8rem; font-size: .72rem; opacity: .5; font-family: ui-monospace, monospace; }
   h1, h2, h3 { line-height: 1.25; margin: 1.6em 0 .5em; }
   h1 { border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); padding-bottom: .25em; }
   code { font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; background: color-mix(in srgb, currentColor 10%, transparent); padding: .15em .35em; border-radius: 4px; }
@@ -138,65 +314,25 @@ local HTML = [==[
   table { border-collapse: collapse; }
   td, th { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); padding: .35em .7em; }
   #empty { opacity: .5; font-style: italic; }
-</style>
-</head>
-<body>
-<div id="status">connecting…</div>
-<div id="layout">
-  <nav id="side">
-    <h2>markdown buffers</h2>
-    <div id="buflist"></div>
-    <button id="follow" title="Render whichever buffer is active in the editor"></button>
-    <button id="cursorfollow" title="Scroll to keep the editor's cursor line in view"></button>
-  </nav>
-  <article id="main"><p id="empty">loading…</p></article>
-</div>
-<script type="module">
-import { marked } from "https://cdn.jsdelivr.net/npm/marked/+esm";
-import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
-import hljs from "https://cdn.jsdelivr.net/npm/highlight.js@11/+esm";   // ~190 languages
+</style></head>
+<body><main id="main"><p id="empty">loading…</p></main>
+<script nonce="${NONCE}">${AGENT}<\/script></body></html>`;
 
-// The page's ONE hand-rolled escape: a mermaid fence goes back into the DOM as source
-// text for mermaid to read, so it cannot be interpolated raw — a diagram containing
-// markup would be parsed as HTML, and a literal "</pre>" would break out of the block.
-const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-
-// Auto-detection runs the text through every grammar highlight.js has, so it is by far
-// the most expensive thing a render does. Past this size an unlabelled fence is left
-// plain rather than spending seconds on it inside a poll.
-const HL_MAX = 100000;
-
-// mermaid fences become <pre class="mermaid">; every other code block is syntax-highlighted
-// by highlight.js — by the fence's language when it names a known one, else auto-detected.
-// hljs.highlight()/highlightAuto() return HTML-escaped, span-wrapped markup, so escaping is
-// the library's job there. Returning false anywhere here falls back to marked's own code
-// renderer, which escapes too.
-marked.use({ renderer: { code({ text, lang }) {
-  if (lang === "mermaid") return `<pre class="mermaid">${esc(text)}</pre>`;
-  const language = lang && hljs.getLanguage(lang) ? lang : null;
-  if (!language && text.length > HL_MAX) return false;
-  try {
-    const out = language ? hljs.highlight(text, { language }) : hljs.highlightAuto(text);
-    return `<pre><code class="hljs${language ? " language-" + language : ""}">${out.value}</code></pre>`;
-  } catch { return false; }
-}}});
-marked.use({ gfm: true, breaks: false });
-mermaid.initialize({ startOnLoad: false });
-
-const statusEl = document.getElementById("status");
-const listEl = document.getElementById("buflist");
-const mainEl = document.getElementById("main");
-const followEl = document.getElementById("follow");
-const cursorFollowEl = document.getElementById("cursorfollow");
-
-const MD_RE = /\.(md|markdown|mdown|mkd|mkdn|mdx)$/i;
-const POLL_MS = 500;
-
-// The mount's base path, for the relative fetches below. mount:url() is trailing-slashed,
-// but a URL typed or bookmarked without the slash serves the same page — and then a bare
-// "buffers" would resolve one level UP, out of the mount, and every poll would 404. So
-// derive the base rather than trusting the address bar to end in "/".
-const BASE = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
+// Messages to the frame wait for its agent to say it is listening (a handshake rather than
+// the load event, which the iframe's initial about:blank can also fire). Posted to "*"
+// because the frame's origin is opaque ("null") and cannot be named.
+let frameLoaded = false;
+const outbox = [];
+function post(m) {
+  if (frameLoaded) frameEl.contentWindow.postMessage(m, "*");
+  else outbox.push(m);
+}
+addEventListener("message", (e) => {
+  if (frameLoaded || e.source !== frameEl.contentWindow || !e.data || e.data.t !== "ready") return;
+  frameLoaded = true;
+  for (const m of outbox.splice(0)) frameEl.contentWindow.postMessage(m, "*");
+});
+frameEl.srcdoc = FRAME_HTML;
 
 // localStorage throws outright where storage is blocked (some private-browsing and
 // embedded contexts). The toggle then just doesn't persist, instead of the exception
@@ -262,20 +398,49 @@ function resolvePath(baseDir, href) {
   return "/" + stack.join("/");
 }
 
-// Point a document-relative <img src> at the mount's own /asset route. The browser has no
-// filesystem, so a screenshot committed beside the document can only reach the page through
-// the editor — the same reason a link to a closed file goes through /file. Anything already
-// carrying a scheme (https:, data:) or protocol-relative is left exactly as the author
-// wrote it, and so is an image in a document we have no path for (nothing to resolve
+// An image's bytes from the mount's /asset route, as a data: URL (null when it cannot be
+// read). The sandboxed frame cannot load from the mount itself, so the shell fetches and
+// inlines. Cached per document (cleared on a switch), so a re-rendered block does not
+// refetch every image in it.
+const assetCache = new Map();   // abs path -> Promise<string | null>
+function assetData(path) {
+  let p = assetCache.get(path);
+  if (!p) {
+    p = fetch(BASE + "asset?path=" + encodeURIComponent(path), { cache: "no-store" })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => blob && new Promise((res) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result));
+        fr.onerror = () => res(null);
+        fr.readAsDataURL(blob);
+      }))
+      .catch(() => null);
+    assetCache.set(path, p);
+  }
+  return p;
+}
+
+// Point a document-relative <img src> at the mount's own /asset route — inlined. The browser
+// has no filesystem, so a screenshot committed beside the document can only reach the page
+// through the editor — the same reason a link to a closed file goes through /file. Anything
+// already carrying a scheme (https:, data:) or protocol-relative is left exactly as the
+// author wrote it, and so is an image in a document we have no path for (nothing to resolve
 // against). `srcset` is not rewritten — marked never emits one, and a hand-written one in
-// raw HTML keeps whatever the author put there.
-function localizeImages(el) {
+// raw HTML keeps whatever the author put there. `el` is an INERT template fragment, so
+// setting src here loads nothing.
+async function localizeImages(el) {
   if (!shownPath) return;
+  const jobs = [];
   for (const img of el.querySelectorAll("img")) {
     const src = img.getAttribute("src") || "";
     if (!src || src.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(src)) continue;
-    img.setAttribute("src", BASE + "asset?path=" + encodeURIComponent(resolvePath(dirOf(shownPath), src)));
+    const path = resolvePath(dirOf(shownPath), src);
+    jobs.push(assetData(path).then((data) => {
+      if (data) img.setAttribute("src", data);
+      else img.removeAttribute("src");
+    }));
   }
+  await Promise.all(jobs);
 }
 
 // ----- render --------------------------------------------------------------
@@ -283,8 +448,9 @@ let shownKey = null;    // "b:<id>" / "f:<path>" of what is rendered, for change
 let shownText = null;   // its last text, so an unchanged poll does not re-render
 let shownPath = null;   // the rendered doc's absolute path, the base for link resolution
 let docRoot = "";       // the editor's workspace root, the base for a "/…" link or image
-let shownBlocks = [];   // [{ raw, ls, le, el }] currently in #main, in document order
-let cursorEl = null;    // the block carrying .cursor-here, so we touch two nodes, not all
+let shownBlocks = [];   // [{ raw, ls, le, id }] currently in the frame, in document order
+let cursorId = null;    // the block id carrying the cursor highlight
+let nextBlockId = 1;    // block ids are never reused, so the frame cannot confuse two
 let listKey = null;     // signature of the last sidebar, so we only rebuild on a change
 let statusText = null;  // last status written, so an unchanged poll writes no DOM
 
@@ -310,53 +476,44 @@ function lexBlocks(md) {
   return blocks;
 }
 
-function renderBlock(b) {
-  const el = document.createElement("div");
-  el.className = "blk";
+// One block's HTML, for the frame. Parsed into an inert <template> — scripts there never
+// run and images never load — and serialized straight back out, so the document's markup
+// never touches this page's live DOM.
+async function renderBlock(b) {
+  const tpl = document.createElement("template");
   const one = [b.tok]; one.links = b.links;   // keep reference-link defs for the parser
-  el.innerHTML = marked.parser(one);
-  localizeImages(el);
-  return el;
+  tpl.innerHTML = marked.parser(one);
+  const el = tpl.content;
+  await localizeImages(el);
+  return tpl.innerHTML;
 }
 
-// Re-render `md` into #main, REUSING the DOM of every block whose source text is
-// unchanged, and return only the freshly-built elements. This is what keeps the poll's
-// cost proportional to the edit instead of to the document: typing in one paragraph
-// re-parses that paragraph, and the twenty highlighted code fences and mermaid diagrams
-// above it keep the DOM (and the pixels) they already have.
+// Re-render `md` into the frame, REUSING every block whose source text is unchanged, and
+// send only the freshly-built ones. This is what keeps the poll's cost proportional to the
+// edit instead of to the document: typing in one paragraph re-parses that paragraph, and
+// the twenty highlighted code fences and mermaid diagrams above it keep the DOM (and the
+// pixels) they already have — the frame's agent draws mermaid for the fresh blocks only.
 //
 // Blocks are matched by their raw source, taken in order, so a document with several
 // identical blocks still pairs each with its own element.
-function reconcile(md) {
-  const reusable = new Map();   // raw -> queue of elements from the previous render
+async function reconcile(md, reset) {
+  const reusable = new Map();   // raw -> queue of block ids from the previous render
   for (const p of shownBlocks) {
     let q = reusable.get(p.raw);
     if (!q) reusable.set(p.raw, q = []);
-    q.push(p.el);
+    q.push(p.id);
   }
   const next = [], fresh = [];
   for (const b of lexBlocks(md)) {
     const q = reusable.get(b.raw);
-    let el = (q && q.length) ? q.shift() : null;
-    if (!el) { el = renderBlock(b); fresh.push(el); }
-    next.push({ raw: b.raw, ls: b.ls, le: b.le, el });
+    let id = (q && q.length) ? q.shift() : null;
+    if (id == null) { id = nextBlockId++; fresh.push([id, renderBlock(b)]); }
+    next.push({ raw: b.raw, ls: b.ls, le: b.le, id });
   }
-  mainEl.replaceChildren(...next.map((n) => n.el));
+  const add = await Promise.all(fresh.map(async ([id, html]) => [id, await html]));
   shownBlocks = next;
-  if (cursorEl && !cursorEl.isConnected) cursorEl = null;
-  return fresh;
-}
-
-// Draw the mermaid diagrams inside `els` (only ever the fresh blocks — an untouched
-// diagram keeps its rendered SVG). mermaid THROWS on a diagram it cannot parse, which is
-// the normal state of a fence you are halfway through typing; contain that here so a bad
-// diagram leaves its own <pre> as source text instead of failing the poll and reporting
-// the editor gone.
-async function runMermaid(els) {
-  const nodes = [];
-  for (const el of els) for (const n of el.querySelectorAll("pre.mermaid")) nodes.push(n);
-  if (nodes.length === 0) return;
-  try { await mermaid.run({ nodes, suppressErrors: true }); } catch {}
+  if (cursorId != null && !next.some((n) => n.id === cursorId)) cursorId = null;
+  post({ t: "render", order: next.map((n) => n.id), add, reset });
 }
 
 // Fetch `url` and render it, unless its text is unchanged from last time. Returns false
@@ -368,45 +525,40 @@ async function renderFrom(url, key, path) {
   shownPath = path;
   if (key === shownKey && md === shownText) return true;
   const switched = key !== shownKey;   // a different doc, not just a live edit of this one
-  // Another document's blocks are not ours to reuse, however alike they look.
-  if (switched) { shownBlocks = []; cursorEl = null; }
+  // Another document's blocks (and images) are not ours to reuse, however alike they look.
+  // Switching documents also starts the frame at the top (`scrollTo(0, 0)` in the agent);
+  // an edit to the SAME doc keeps your place.
+  if (switched) { shownBlocks = []; cursorId = null; assetCache.clear(); }
   shownKey = key; shownText = md;
-  await runMermaid(reconcile(md));
-  // Switching documents starts at the top; an edit to the SAME doc keeps your place.
-  if (switched) scrollTo(0, 0);
+  await reconcile(md, switched);
   return true;
 }
 
 // Mark the block that holds source `line` (1-based) as the cursor line; `null` clears it.
 // Cheap enough to run every poll — the cursor moves without the text changing, so this is
-// separate from the re-render, and it writes to at most the two blocks whose class
-// actually changes. When cursor-follow is on, scroll that block into view — but only when
-// the line actually CHANGED, so a user who scrolls away while the cursor sits still is not
-// yanked back every poll; the follow resumes on the next cursor move.
+// separate from the re-render, and it messages the frame only when something changes.
+// When cursor-follow is on, the frame scrolls that block into view (`hit.scrollIntoView`
+// in the agent) — but only when the line actually CHANGED, so a user who scrolls away
+// while the cursor sits still is not yanked back every poll; the follow resumes on the
+// next cursor move.
 function applyCursor(line) {
   let hit = null;
   if (line != null) {
     for (const b of shownBlocks) {
       if (b.ls > line) break;   // blocks are in source order, so this one is past it
-      if (line <= b.le) { hit = b.el; break; }
+      if (line <= b.le) { hit = b.id; break; }
     }
   }
-  if (hit !== cursorEl) {
-    if (cursorEl) cursorEl.classList.remove("cursor-here");
-    if (hit) hit.classList.add("cursor-here");
-    cursorEl = hit;
-  }
-  if (autoScroll && hit && line !== lastCursorLine) {
-    hit.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
+  const scroll = Boolean(autoScroll && hit && line !== lastCursorLine);
+  if (hit !== cursorId || scroll) post({ t: "cursor", id: hit, scroll });
+  cursorId = hit;
   lastCursorLine = line;
 }
 
 function showEmpty(msg) {
   shownKey = null; shownText = null; shownPath = null;
-  shownBlocks = []; cursorEl = null;
-  const p = document.createElement("p"); p.id = "empty"; p.textContent = msg;
-  mainEl.replaceChildren(p);
+  shownBlocks = []; cursorId = null;
+  post({ t: "empty", text: msg });
 }
 
 // Rebuild the sidebar: the open buffers, plus — when we are viewing a linked file that is
@@ -441,19 +593,23 @@ function renderList(data, sel, diskFile) {
   }
 }
 
-// A click on a link inside the rendered doc. External links open in a new tab; an in-page
-// anchor is left alone; a link to a MARKDOWN file navigates the preview (pinning it as a
-// disk file — a tick then prefers the live buffer if that file happens to be open).
-mainEl.addEventListener("click", (e) => {
-  const a = e.target.closest("a");
-  if (!a) return;
-  const href = a.getAttribute("href") || "";
-  if (!href || href.startsWith("#")) return;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { a.target = "_blank"; a.rel = "noopener"; return; }
+// A link clicked inside the rendered doc, reported by the frame's agent. The `href` came
+// out of the document, so it is UNTRUSTED: only `http(s):`/`mailto:` (and protocol-relative)
+// links open, in a new tab with no opener — a `javascript:` or any other scheme is
+// dropped, since opening it from here would run it with this page's privileges. A link to
+// a MARKDOWN file navigates the preview (pinning it as a disk file — a tick then prefers
+// the live buffer if that file happens to be open); any other relative link does nothing.
+addEventListener("message", (e) => {
+  if (e.source !== frameEl.contentWindow || !e.data || e.data.t !== "link") return;
+  const href = e.data.href;
+  if (typeof href !== "string" || !href) return;
+  if (href.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    if (href.startsWith("//") || /^(https?|mailto):/i.test(href)) window.open(href, "_blank", "noopener");
+    return;
+  }
   if (!shownPath) return;                          // no base path to resolve against
   const path = resolvePath(dirOf(shownPath), href);
   if (!MD_RE.test(path)) return;                   // only markdown links drive the preview
-  e.preventDefault();
   location.hash = "f:" + encodeURIComponent(path);
 });
 

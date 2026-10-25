@@ -42,7 +42,15 @@ local function ensure_mount()
     return pending
   end
   pending = btv.http
-    .mount({ name = "bemtvi-markdown-preview", on_request = server.handle })
+    .mount({
+      name = "bemtvi-markdown-preview",
+      on_request = server.handle,
+      -- The page shell must fetch its own mount (`/buffers`, `/source`, `/asset`), which a
+      -- sandboxed document cannot, so it opts out of the mount sandbox. That is safe only
+      -- because the shell is entirely this plugin's code: every rendered document goes
+      -- into the page's own `<iframe sandbox>` (opaque origin) — see page.lua.
+      same_origin = true,
+    })
     :next(function(m)
       mount = m
       pending = nil

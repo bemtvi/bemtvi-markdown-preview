@@ -142,13 +142,13 @@ refuses anything else with a 405.
 # Notes
 
 marked, highlight.js, and mermaid load from the jsDelivr CDN, so the preview page needs internet for
-those libraries. It renders your local buffers but pulls the renderer from a CDN; the mount's CSP
+those libraries. It renders your local buffers but pulls the renderer from a CDN; the page's CSP
 confines scripts and styles to `'self'` plus jsDelivr.
 
-Images are the one thing the CSP lets in from further afield. `'self'` covers the mount's own
-`/asset` route (a relative image read off disk), `data:` an inline one, and `https:` a README's
-badges and hosted screenshots — which would otherwise all render broken. An image is inert, so this
-widens what the page can *display*, not what it can run; plain `http:` images are still blocked.
+Images are the one thing the CSP lets in from further afield. A relative image is read off disk
+through the mount's `/asset` route and inlined as a `data:` URL; `data:` and `https:` images (a
+README's badges and hosted screenshots) are shown as written. An image is inert, so this widens what
+the page can *display*, not what it can run; plain `http:` images are still blocked.
 
 Escaping is the library's job almost everywhere: highlight.js returns escaped markup, the page's
 code-block renderer falls back to marked's own (HTML-escaping) renderer, and every dynamic value
@@ -156,7 +156,14 @@ code-block renderer falls back to marked's own (HTML-escaping) renderer, and eve
 fence, whose source has to go back into the page as text for mermaid to read — that one insertion
 the page escapes itself.
 
-Security: `btv.http.mount` mounts share one origin, so the same-origin policy does not isolate one
-mount from another — a mount is a trust boundary between the editor and the network, not between
-plugins. The preview renders content you are actively editing (your own buffers); marked does not
-sanitize, so raw HTML in a buffer renders, as expected for a preview of your own documents.
+Security: marked does not sanitize, so a document's raw HTML renders — and a document is not always
+your own (a README from a repository under review). The page is therefore split in two. The shell
+(sidebar, polling, parsing) is the plugin's own code; it is the one part that can reach the mount, so
+its mount opts out of the `btv.http.mount` sandbox (`same_origin = true`). Every rendered document
+goes into a nested `<iframe sandbox="allow-scripts">` without `allow-same-origin`: it runs in an
+opaque origin, so nothing in a document can read the shell, call the mount, or — on the web build,
+where mounts share the editor's origin — touch the editor's storage or its daemon link. The frame's
+own CSP runs only the shell's per-load nonced script (and mermaid from its pinned jsDelivr path), so
+a document's `<script>` tags and inline handlers never execute, and it has no network beyond images.
+Links in a document are handed to the shell: `http(s):` and `mailto:` open in a new tab, a link to a
+markdown file navigates the preview, and any other scheme (`javascript:`) is dropped.

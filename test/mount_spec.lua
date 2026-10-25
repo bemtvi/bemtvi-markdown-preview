@@ -17,7 +17,9 @@ btv.test.describe("bemtvi-markdown-preview over a real mount", function()
     local buf = btv.buf.current()
     btv.await(btv.fs.write(dir .. "/linked.md", "# Linked\n"))
 
-    local mount = btv.await(btv.http.mount({ name = "mdprev-e2e", on_request = server.handle }))
+    local mount = btv.await(
+      btv.http.mount({ name = "mdprev-e2e", on_request = server.handle, same_origin = true })
+    )
     local url = mount:url()
 
     -- "/" — the page shell, with the CSP the browser will actually enforce.
@@ -71,5 +73,33 @@ btv.test.describe("bemtvi-markdown-preview over a real mount", function()
 
     mount:close()
     btv.test.expect(mount:is_open()).to_be_falsy()
+  end)
+
+  -- :MarkdownPreview's own mount: the shell opts out of the mount sandbox (it must fetch
+  -- its own routes) and so must carry the frame that contains every rendered document.
+  btv.test.it(":MarkdownPreview serves the shell same-origin, documents sandboxed", function(t)
+    local preview = require("bemtvi-markdown-preview")
+    local real_open = btv.ui.open
+    local opened
+    btv.ui.open = function(u)
+      opened = u
+    end
+    preview.open()
+    local ok, err = pcall(function()
+      t:wait_for(function()
+        return opened
+      end, { tries = 200, interval = 20, message = ":MarkdownPreview never opened" })
+    end)
+    btv.ui.open = real_open
+    assert(ok, err)
+    btv.test.expect(opened).to_be(preview.url())
+
+    local root = btv.await(btv.http.fetch(opened))
+    btv.test.expect(root.status).to_be(200)
+    local csp = root.headers["content-security-policy"]
+    btv.test.expect(csp).to_contain("default-src 'self'")
+    btv.test.expect(csp:find("sandbox", 1, true)).to_be_nil()
+    btv.test.expect(root.body).to_contain('<iframe id="doc" sandbox="allow-scripts"')
+    preview.stop()
   end)
 end)
